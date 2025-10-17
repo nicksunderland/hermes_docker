@@ -1,0 +1,72 @@
+---
+title: "GWAS Summary Report"
+output:
+  pdf_document:
+    toc: false
+    number_sections: true
+    fig_caption: true
+fontsize: 11pt
+geometry: margin=1in
+header-includes:
+   - \usepackage{booktabs}
+   - \usepackage{longtable}
+   - \usepackage{caption}
+   - \usepackage[table]{xcolor}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 10
+)
+
+library(data.table)
+library(ggplot2)
+library(kableExtra)
+library(jsonlite)
+```
+# Cohort details
+```{r details, echo=FALSE, results='asis'}
+json_str <- toJSON(meta, pretty = TRUE, auto_unbox = TRUE)
+cat("```json\n", json_str, "\n```", sep = "")
+```
+
+# Missingness & data validity
+```{r missingness, echo=FALSE}
+knitr::kable(summary, format = "latex", booktabs = TRUE, caption = "GWAS Summary") |>
+  kable_styling(latex_options = c("striped", "hold_position", "scale_down"))
+```
+
+# Lift-over to Hg38
+```{r lift, echo=FALSE}
+knitr::kable(liftover_stats, format = "latex", booktabs = TRUE, caption = "GWAS Lift-over") |>
+  kable_styling(latex_options = c("striped", "hold_position", "scale_down"))
+```
+
+# Harmonisation
+```{r harmonisation, echo=FALSE}
+knitr::kable(harm_summary, format = "latex", booktabs = TRUE, caption = "GWAS Harmonisation") |>
+  kable_styling(latex_options = c("striped", "hold_position", "scale_down"))
+```
+
+# Allele frequency difference
+```{r freq_plot, echo=FALSE, out.width='80%', fig.align='center'}
+eaf_plot
+```
+
+```{r freq_diff, echo=FALSE}
+knitr::kable(freq_diff_summary, format = "latex", booktabs = TRUE, caption = "GWAS allele frequency difference") |>
+  kable_styling(latex_options = c("striped", "hold_position", "scale_down"))
+```
+
+# Analytical plots
+```{r, pz_plot, echo=FALSE, out.width='80%', fig.align='center'}
+pz_plot
+```
+
+```{r qq_plot, echo=FALSE, out.width='80%', fig.align='center'}
+qq_plot
+```

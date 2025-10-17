@@ -1,0 +1,5 @@
+tests/data
+tests/output
+tests/resources
+.idea
+docker_build.log

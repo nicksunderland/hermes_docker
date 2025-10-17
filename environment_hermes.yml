@@ -1,0 +1,22 @@
+name: hermes
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.11
+  - r-base=4.4.3
+  - r-essentials
+  - r-r.utils
+  - r-data.table
+  - r-vcfr
+  - r-ggplot2
+  - r-hexbin
+  - r-ggpubr
+  - r-remotes
+  - r-png
+  - r-knitr
+  - r-rmarkdown
+  - r-kableextra
+  - bcftools=1.22
+  - bcftools-liftover-plugin=1.22

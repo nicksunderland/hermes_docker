@@ -1,0 +1,38 @@
+name: gwas2vcf
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.7
+  - gcc_linux-64=9.3
+  - gxx_linux-64=9.3
+  - make
+  - zlib
+  - bzip2
+  - libcurl
+  - sysroot_linux-64=2.17
+  - kernel-headers_linux-64=3.10
+  - Cython=0.29.17
+  - pysam=0.15.2
+  - attrs=21.4.0
+  - pytest=5.3.5
+  - packaging=21.3
+  - pluggy=0.13.1
+  - py=1.11.0
+  - pyparsing=3.0.7
+  - more-itertools=8.12.0
+  - numpy=1.15.4
+  - biopython=1.72
+  - wcwidth=0.2.5
+  - pip=22.0.4
+  - pip:
+    - marshmallow==2.18.1
+    - git+https://github.com/bioinformed/vgraph@5866e6a686ce98e8d02f6f97f6ab025c89f123b9#egg=vgraph
+
+# this is a right pain to get right on the HPC
+# 1. run mamba env create -f path/to/this/environment.yml
+# 2. then force recompilation of vgraph with Cython/C using the active environment’s GCC toolchain by doing:
+# 3. conda activate gwas2vcf
+# 4. pip uninstall -y vgraph
+# 5. pip install --no-cache-dir --force-reinstall git+https://github.com/bioinformed/vgraph@5866e6a686ce98e8d02f6f97f6ab025c89f123b9#egg=vgraph
