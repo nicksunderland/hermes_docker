@@ -65,6 +65,8 @@ cols <- c(rsid="ID", chr="CHROM", bp_b38="POS", oa="REF", ea="ALT", eaf="AF", be
 gwas[, setdiff(names(gwas), unname(cols)) := NULL]
 setnames(gwas, unname(cols), names(cols))
 setcolorder(gwas, names(cols))
+rm(vcf_dat)
+gc()
 
 # fix data
 cat("fixing data types\n")
@@ -98,9 +100,29 @@ col_fn_list <- list(
   eas_afreq = as.numeric,
   sas_afreq = as.numeric
 )
+
+ancestry_map <- list(
+  eur = "eur",
+  eu = "eur",
+  af = "afr",
+  afr = "afr",
+  aa = "afr",
+  ssaf = "afr",
+  ea = "eas",
+  eas = "eas",
+  hs = "amr",
+  amr = "amr",
+  mixed = "amr",
+  sa = "sas",
+  sas = "sas",
+  gme = "sas",
+  mid = "sas"
+)
+ancestry_parsed <- ancestry_map[[tolower(meta$ancestry)]]
+
 freq[ , names(col_fn_list) := Map(function(fn, col) fn(col), col_fn_list[names(col_fn_list)], .SD), .SDcols = names(col_fn_list)]
-freq <- freq[, .SD, .SDcols = c(names(freq)[!grepl("afreq", names(freq))], paste0(tolower(meta$ancestry), "_afreq"))]
-setnames(freq, paste0(tolower(meta$ancestry), "_afreq"), "afreq")
+freq <- freq[, .SD, .SDcols = c(names(freq)[!grepl("afreq", names(freq))], paste0(ancestry_parsed, "_afreq"))]
+setnames(freq, paste0(ancestry_parsed, "_afreq"), "afreq")
 freq <- freq[!is.na(afreq)]
 
 
@@ -138,7 +160,7 @@ eaf_plot <- ggplot(mapping = aes(x = reference_afreq, y = eaf)) +
   geom_abline(slope = 1, intercept =  freq_diff_thresh, linetype = "dashed", color = "red") +
   geom_abline(slope = 1, intercept = -1 * freq_diff_thresh, linetype = "dashed", color = "red") +
   scale_color_manual(values = stats::setNames(c("royalblue", "firebrick", "black"), levels(gwas$freq_diff))) +
-  labs(x = paste0("Reference [", toupper(meta$ancestry), "] allele frequency"), y = "Cohort allele frequency", fill = "Freq. difference") +
+  labs(x = paste0("Reference [", toupper(ancestry_parsed), "] allele frequency"), y = "Cohort allele frequency", fill = "Freq. difference") +
   lims(x = c(0,1), y = c(0,1)) +
   theme_minimal(base_size = 18) +
   theme(legend.position = "top",
@@ -179,7 +201,7 @@ ldscr_dat <- gwas[, list(SNP = reference_id,
 
 # try to run LDSC
 tryCatch({
-  ldsc_res <- ldsc_h2(munged_sumstats = ldscr_dat, ancestry = toupper(meta$ancestry))
+  ldsc_res <- ldsc_h2(munged_sumstats = ldscr_dat, ancestry = toupper(ancestry_parsed))
 },
 error = function(e) {
   ldsc_res <<- list(intercept = NA_real_)
@@ -333,6 +355,13 @@ if(length(line) == 0){
   )
 }
 
+# save png files
+eaf_plot_fp <- "/tmp/output/eaf_plot.png"
+qq_plot_fp  <- "/tmp/output/qq_plot.png"
+pz_plot_fp  <- "/tmp/output/pz_plot.png"
+ggsave(eaf_plot_fp, eaf_plot, width = 6, height = 6, dpi = 300, bg = "white")
+ggsave(qq_plot_fp,  qq_plot,  width = 6, height = 6, dpi = 300, bg = "white")
+ggsave(pz_plot_fp,  pz_plot,  width = 6, height = 6, dpi = 300, bg = "white")
 
 # create report
 dir.create(dirname(report), showWarnings = FALSE, recursive = TRUE)

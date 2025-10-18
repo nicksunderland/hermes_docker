@@ -55,20 +55,29 @@ RUN source /opt/conda/etc/profile.d/conda.sh && \
     conda activate gwas2vcf && \
     pip uninstall -y vgraph || true && \
     pip install --no-cache-dir --force-reinstall \
-        git+https://github.com/bioinformed/vgraph@5866e6a686ce98e8d02f6f97f6ab025c89f123b9#egg=vgraph
+        git+https://github.com/bioinformed/vgraph@5866e6a686ce98e8d02f6f97f6ab025c89f123b9#egg=vgraph && \
+    conda deactivate
+
+# Activate hermes env and install my fixed version of ldscr
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate hermes && \
+    git clone https://github.com/nicksunderland/ldscr.git /tmp/ldscr && \
+    Rscript -e "install.packages(c('checkmate','corrr','gdata','ggtext'), repos='https://cloud.r-project.org')" && \
+    Rscript -e "install.packages('/tmp/ldscr', repos = NULL, type = 'source')" && \
+    rm -rf /tmp/ldscr && \
+    conda deactivate
 
 # Get gwas2vcf repository
-RUN git clone --branch 1.4.3 https://github.com/MRCIEU/gwas2vcf.git /opt/gwas2vcf
-RUN chmod +x /opt/gwas2vcf/main.py
+RUN git clone --branch 1.4.3 https://github.com/MRCIEU/gwas2vcf.git /gwas2vcf
+RUN chmod +x /gwas2vcf/main.py
 
 # Copy the QC scripts and entrypoint
-COPY run.sh /opt/run.sh
-COPY scripts /opt/scripts
+COPY run.sh /run.sh
+COPY scripts /scripts
 
-WORKDIR /opt
-RUN chmod +x run.sh
+RUN chmod +x /run.sh
 
-ENTRYPOINT ["/opt/run.sh"]
+ENTRYPOINT ["/run.sh"]
 
 
 

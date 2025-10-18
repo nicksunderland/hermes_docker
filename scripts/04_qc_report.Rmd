@@ -1,17 +1,11 @@
 ---
 title: "GWAS Summary Report"
 output:
-  pdf_document:
+  html_document:
     toc: false
     number_sections: true
     fig_caption: true
 fontsize: 11pt
-geometry: margin=1in
-header-includes:
-   - \usepackage{booktabs}
-   - \usepackage{longtable}
-   - \usepackage{caption}
-   - \usepackage[table]{xcolor}
 ---
 
 ```{r setup, include=FALSE}
@@ -36,37 +30,37 @@ cat("```json\n", json_str, "\n```", sep = "")
 
 # Missingness & data validity
 ```{r missingness, echo=FALSE}
-knitr::kable(summary, format = "latex", booktabs = TRUE, caption = "GWAS Summary") |>
-  kable_styling(latex_options = c("striped", "hold_position", "scale_down"))
+knitr::kable(summary, format = "html", booktabs = TRUE, caption = "GWAS Summary") |>
+  kable_styling(bootstrap_options = c("striped", "hold_position", "scale_down"))
 ```
 
 # Lift-over to Hg38
 ```{r lift, echo=FALSE}
-knitr::kable(liftover_stats, format = "latex", booktabs = TRUE, caption = "GWAS Lift-over") |>
-  kable_styling(latex_options = c("striped", "hold_position", "scale_down"))
+knitr::kable(liftover_stats, format = "html", booktabs = TRUE, caption = "GWAS Lift-over") |>
+  kable_styling(bootstrap_options = c("striped", "hold_position", "scale_down"))
 ```
 
 # Harmonisation
 ```{r harmonisation, echo=FALSE}
-knitr::kable(harm_summary, format = "latex", booktabs = TRUE, caption = "GWAS Harmonisation") |>
-  kable_styling(latex_options = c("striped", "hold_position", "scale_down"))
+knitr::kable(harm_summary, format = "html", booktabs = TRUE, caption = "GWAS Harmonisation") |>
+  kable_styling(bootstrap_options = c("striped", "hold_position", "scale_down"))
 ```
 
 # Allele frequency difference
 ```{r freq_plot, echo=FALSE, out.width='80%', fig.align='center'}
-eaf_plot
+knitr::include_graphics(eaf_plot_fp, rel_path=FALSE)
 ```
 
 ```{r freq_diff, echo=FALSE}
-knitr::kable(freq_diff_summary, format = "latex", booktabs = TRUE, caption = "GWAS allele frequency difference") |>
-  kable_styling(latex_options = c("striped", "hold_position", "scale_down"))
+knitr::kable(freq_diff_summary, format = "html", booktabs = TRUE, caption = "GWAS allele frequency difference") |>
+  kable_styling(bootstrap_options = c("striped", "hold_position", "scale_down"))
 ```
 
 # Analytical plots
 ```{r, pz_plot, echo=FALSE, out.width='80%', fig.align='center'}
-pz_plot
+knitr::include_graphics(pz_plot_fp, rel_path=FALSE)
 ```
 
 ```{r qq_plot, echo=FALSE, out.width='80%', fig.align='center'}
-qq_plot
+knitr::include_graphics(qq_plot_fp, rel_path=FALSE)
 ```

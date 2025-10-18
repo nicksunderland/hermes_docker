@@ -1,4 +1,6 @@
 docker run --rm \
+  --memory=24g \
+  --memory-swap=24g \
   -v /Users/xx20081/git/hermes_docker/tests/data:/data \
   -v /Users/xx20081/git/hermes_docker/tests/resources:/resources \
   -v /Users/xx20081/git/hermes_docker/tests/output:/output \
@@ -11,7 +13,7 @@ docker run --rm \
 
 # server command ???
 #ContainerProperties:
-#  Image: nicksunderland/hermes_docker:latest
+  #  Image: nicksunderland/hermes_docker:latest
 #  Command:
 #    - '/bin/bash'
 #    - '/opt/run.sh'

@@ -1,6 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+show_help() {
+  cat << EOF
+Usage: $(basename "$0") <s3-data-path> <json-path> <resources-dir> <file-guid>
+
+Description:
+  This script runs the Hermes QC job using the specified input data and configuration.
+
+Arguments:
+  <s3-data-path>     Path to the input data on S3 (e.g., s3://bucket/path/data.csv)
+  <json-path>        Path to the JSON config file
+  <resources-dir>    Local or S3 path to the resources directory
+  <file-guid>        Unique file GUID or identifier
+
+Options:
+  -h, --help         Show this help message and exit
+
+Examples:
+  $(basename "$0") s3://my-bucket/input.json config.json ./resources abc123
+EOF
+}
+
+# Check if user asked for help
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  show_help
+  exit 0
+fi
+
+# Ensure 4 arguments are provided
+if [[ $# -lt 4 ]]; then
+  echo "Error: Missing required arguments."
+  echo "Use --help for usage information."
+  exit 1
+fi
+
 # Arguments passed to the script
 S3_DATA_PATH="$1"
 JSON_PATH="$2"
@@ -47,10 +81,11 @@ LOCAL_OUTPUT="/tmp/output"
 mkdir -p "$LOCAL_RESOURCES" "$LOCAL_OUTPUT"
 
 # Load genome build from JSON file (or string)
+log "Getting GWAS build"
 BUILD=$(python -c "
 import json, os
 
-json_input = os.environ.get('JSON_PATH')
+json_input = '$JSON_PATH'
 
 try:
     # Try reading as a file (local dev case)
@@ -85,7 +120,7 @@ download_or_copy "$S3_DATA_PATH" "$LOCAL_GWAS_FILE"
 log "Getting resource files"
 download_or_copy "$RESOURCES_DIR/$EAF" "$LOCAL_RESOURCES/$EAF"
 download_or_copy "$RESOURCES_DIR/$FASTA_38" "$LOCAL_RESOURCES/$FASTA_38"
-download_or_copy "$RESOURCES_DIR/$FASTA_38.fai" "$LOCAL_RESOURCES/${FASTA_38}.fai"
+download_or_copy "$RESOURCES_DIR/$FASTA_38_UNZ.fai" "$LOCAL_RESOURCES/${FASTA_38_UNZ}.fai"
 download_or_copy "$RESOURCES_DIR/$DBSNP_38" "$LOCAL_RESOURCES/$DBSNP_38"
 download_or_copy "$RESOURCES_DIR/$DBSNP_38.tbi" "$LOCAL_RESOURCES/${DBSNP_38}.tbi"
 
@@ -93,7 +128,7 @@ if [[ "$BUILD" == "Hg19" ]]; then
     log "Getting Hg19 resources for liftover"
     download_or_copy "$RESOURCES_DIR/$CHAIN_37_38" "$LOCAL_RESOURCES/$CHAIN_37_38"
     download_or_copy "$RESOURCES_DIR/$FASTA_37" "$LOCAL_RESOURCES/$FASTA_37"
-    download_or_copy "$RESOURCES_DIR/$FASTA_37.fai" "$LOCAL_RESOURCES/${FASTA_37}.fai"
+    download_or_copy "$RESOURCES_DIR/$FASTA_37_UNZ.fai" "$LOCAL_RESOURCES/${FASTA_37_UNZ}.fai"
 fi
 
 # Uncompress FASTA files
@@ -110,7 +145,7 @@ OUTPUT_PARSED_GWAS="${LOCAL_OUTPUT}/parsed_gwas.tsv"
 OUTPUT_GWAS2VCF_JSON="${LOCAL_OUTPUT}/gwas2vcf.json"
 OUTPUT_STEP1_SUMMARY="${LOCAL_OUTPUT}/step1_summary.tsv"
 
-Rscript /opt/scripts/01_parse_data.R \
+Rscript /scripts/01_parse_data.R \
   "$LOCAL_GWAS_FILE" \
   "$JSON_PATH" \
   "$OUTPUT_PARSED_GWAS" \
@@ -129,7 +164,7 @@ OUTPUT_STEP2_SUMMARY="${LOCAL_OUTPUT}/step2_summary.tsv"
 REF="$LOCAL_RESOURCES/$FASTA_38_UNZ"
 [[ "$BUILD" == "Hg19" ]] && REF="$LOCAL_RESOURCES/$FASTA_37_UNZ"
 
-python /opt/gwas2vcf/main.py \
+python /gwas2vcf/main.py \
     --data "$OUTPUT_PARSED_GWAS" \
     --json "$OUTPUT_GWAS2VCF_JSON" \
     --id "foo" \
@@ -159,6 +194,7 @@ if [[ "$BUILD" == "Hg19" ]]; then
     mv "$OUTPUT_VCF_B38.tmp.sorted.gz" "$OUTPUT_VCF_B38.tmp.gz"
 else
     cp "$OUTPUT_VCF" "$OUTPUT_VCF_B38.tmp.gz"
+    : > "$OUTPUT_STEP3_SUMMARY"
 fi
 
 bcftools index -f --csi "$OUTPUT_VCF_B38.tmp.gz"
@@ -180,16 +216,16 @@ log "Step 3 completed"
 log "Running QC Step 4 reporting"
 EAF_REF="$LOCAL_RESOURCES/$EAF"
 OUTPUT_CLEAN_GWAS="${LOCAL_OUTPUT}/gwas_b38_clean.tsv.gz"
-OUTPUT_REPORT="${LOCAL_OUTPUT}/gwas_report.pdf"
+OUTPUT_REPORT="${LOCAL_OUTPUT}/gwas_report.html"
 
-Rscript /opt/scripts/04_qc_report.R \
+Rscript /scripts/04_qc_report.R \
     "$OUTPUT_VCF_B38" \
     "$JSON_PATH" \
     "$OUTPUT_STEP1_SUMMARY" \
     "$OUTPUT_STEP2_SUMMARY" \
     "$OUTPUT_STEP3_SUMMARY" \
     "$EAF_REF" \
-    "/opt/scripts/04_qc_report.Rmd" \
+    "/scripts/04_qc_report.Rmd" \
     "$OUTPUT_CLEAN_GWAS" \
     "$OUTPUT_REPORT"
 
@@ -213,7 +249,7 @@ if [[ -d "$FILE_GUID" ]]; then
     mkdir -p "$FILE_GUID/images" "$FILE_GUID/tables"
 
     cp "$OUTPUT_CLEAN_GWAS" "$FILE_GUID/tables/"
-    for file in "$LOCAL_OUTPUT/gwas_qc.html" "$LOCAL_OUTPUT/eaf_plot.png" "$LOCAL_OUTPUT/pz_plot.png" "$LOCAL_OUTPUT/qq_plot.png"; do
+    for file in "$LOCAL_OUTPUT/gwas_report.html" "$LOCAL_OUTPUT/eaf_plot.png" "$LOCAL_OUTPUT/pz_plot.png" "$LOCAL_OUTPUT/qq_plot.png"; do
         if [[ ! -f "$file" ]]; then
             echo "ERROR: file not found: $file"
             exit 1
@@ -230,7 +266,7 @@ else
         --no-progress
 
     # Upload HTML + PNG files to images/
-    for file in "$LOCAL_OUTPUT/gwas_qc.html" "$LOCAL_OUTPUT/eaf_plot.png" "$LOCAL_OUTPUT/pz_plot.png" "$LOCAL_OUTPUT/qq_plot.png"; do
+    for file in "$LOCAL_OUTPUT/gwas_report.html" "$LOCAL_OUTPUT/eaf_plot.png" "$LOCAL_OUTPUT/pz_plot.png" "$LOCAL_OUTPUT/qq_plot.png"; do
         if [[ ! -f "$file" ]]; then
             echo "ERROR: file not found: $file"
             exit 1

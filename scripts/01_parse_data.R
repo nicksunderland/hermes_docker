@@ -187,12 +187,12 @@ data.table::fwrite(gwas, parsed_gwas, sep = "\t")
 # save column formatting for gwas2vcf
 json_data <- list(
   chr_col       = which(names(gwas) == "chr") - 1,
-  pos_col       = which(names(gwas) == "pod") - 1,
+  pos_col       = which(names(gwas) == "pos") - 1,
   snp_col       = which(names(gwas) == "rsid") - 1,
   ea_col        = which(names(gwas) == "alt") - 1,
   oa_col        = which(names(gwas) == "reference") - 1,
   beta_col      = which(names(gwas) == "beta") - 1,
-  se_col        = which(names(gwas) == "sterr") - 1,
+  se_col        = which(names(gwas) == "stdErr") - 1,
   ncase_col     = which(names(gwas) == "ncase") - 1,
   ncontrol_col  = which(names(gwas) == "ncontrol") - 1,
   pval_col      = which(names(gwas) == "pval") - 1,
