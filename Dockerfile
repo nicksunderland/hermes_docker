@@ -6,6 +6,7 @@ LABEL authors="nicholas.sunderland@bristol.ac.uk"
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH=/opt/conda/bin:$PATH
+ENV PYTHONUNBUFFERED=1
 
 # Install system dependencies
 USER root
@@ -68,8 +69,34 @@ RUN source /opt/conda/etc/profile.d/conda.sh && \
     conda deactivate
 
 # Get gwas2vcf repository
-RUN git clone --branch 1.4.3 https://github.com/MRCIEU/gwas2vcf.git /gwas2vcf
-RUN chmod +x /gwas2vcf/main.py
+RUN git clone --branch 1.4.3 https://github.com/MRCIEU/gwas2vcf.git /gwas2vcf && \
+    chmod +x /gwas2vcf/main.py
+
+# Patch vcf.py to add null-allele check
+RUN python3 - <<EOF
+fname = "/gwas2vcf/vcf.py"
+lines = []
+
+with open(fname) as f:
+    for line in f:
+        lines.append(line)
+        if "record.id = Vcf.remove_illegal_chars(result.dbsnpid)" in line:
+            # Detect leading whitespace of the line
+            indent = line[:len(line) - len(line.lstrip())]
+            inner_indent = indent + "    "  # 1 level deeper for nested block
+
+            # Append patch using the detected indentation
+            lines.append(f"{indent}# NS added - for some reason there can be null alleles\n")
+            lines.append(f"{indent}if not result.ref or not result.alt:\n")
+            lines.append(f"{inner_indent}logging.warning(f\"Skipping variant with null allele: chrom={{result.chrom}}, pos={{result.pos}}, ref={{result.ref}}, alt={{result.alt}}, dbsnpid={{result.dbsnpid}}\")\n")
+            lines.append(f"{inner_indent}continue\n")
+
+with open(fname, "w") as f:
+    f.writelines(lines)
+EOF
+
+# check patch compiles
+RUN python3 -m py_compile /gwas2vcf/vcf.py
 
 # Copy the QC scripts and entrypoint
 COPY run.sh /run.sh
@@ -83,7 +110,11 @@ ENTRYPOINT ["/run.sh"]
 
 # ====================== # Build & Push Commands # ======================
 # docker buildx create --use
-# push
-# docker buildx build --platform linux/amd64 --progress=plain --tag nicksunderland/hermes_docker:latest --file Dockerfile --push . 2>&1 | tee docker_build.log
-# or load locally
-# docker buildx build --platform linux/amd64 --progress=plain --tag nicksunderland/hermes_docker:latest --file Dockerfile --load . 2>&1 | tee docker_build.log
+
+# all in one:
+# docker buildx build --platform linux/amd64 --progress=plain --tag nicksunderland/hermes_docker:latest --file Dockerfile --cache-from type=registry,ref=nicksunderland/hermes_docker:latest --cache-to type=inline --push . 2>&1 | tee docker_build.log
+
+# clean local and pull:
+# docker rmi nicksunderland/hermes_docker:latest
+# docker image prune -f
+# docker pull --platform linux/amd64 nicksunderland/hermes_docker:latest

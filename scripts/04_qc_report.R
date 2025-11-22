@@ -359,9 +359,9 @@ if(length(line) == 0){
 eaf_plot_fp <- "/tmp/output/eaf_plot.png"
 qq_plot_fp  <- "/tmp/output/qq_plot.png"
 pz_plot_fp  <- "/tmp/output/pz_plot.png"
-ggsave(eaf_plot_fp, eaf_plot, width = 6, height = 6, dpi = 300, bg = "white")
-ggsave(qq_plot_fp,  qq_plot,  width = 6, height = 6, dpi = 300, bg = "white")
-ggsave(pz_plot_fp,  pz_plot,  width = 6, height = 6, dpi = 300, bg = "white")
+ggsave(eaf_plot_fp, eaf_plot, width = 10, height = 10, dpi = 300, bg = "white")
+ggsave(qq_plot_fp,  qq_plot,  width = 10, height = 10, dpi = 300, bg = "white")
+ggsave(pz_plot_fp,  pz_plot,  width = 10, height = 10, dpi = 300, bg = "white")
 
 # create report
 dir.create(dirname(report), showWarnings = FALSE, recursive = TRUE)

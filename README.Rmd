@@ -1,0 +1,328 @@
+---
+title: GWAShub <img src="man/figures/hermes-logo-full.png" align="right" width="200" alt="HERMES Logo" />
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE,
+  fig.path = "man/figures/README-",
+  out.width = "100%"
+)
+library(knitr)
+library(kableExtra)
+library(webshot2)
+```
+
+<!-- badges: start -->
+[![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
+![Docker](https://img.shields.io/docker/image-size/nicksunderland/hermes_docker?label=DockerHub)
+![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)
+<!-- badges: end -->
+
+
+## Introduction
+
+GWAShub is a [**HERMES consortium**](https://www.hermesconsortium.org/) project designed for the automated curation, quality control (QC), and meta-analysis of Genome-Wide Association Study (GWAS) datasets. This initiative is supported by the [**FlannickLab, Broad Institute**](https://www.flannicklab.org/) and developed in close partnership with collaborators at the [**Skin Genetics Consortium**](https://skingeneticsconsortium.org/).
+
+The goal of this solution is to standardize heterogeneous GWAS summary statistics into a clean, harmonized format suitable for downstream meta-analysis.
+
+## Objectives
+
+The aims of this README are to:  
+
+1.  **Document and finalise** the automated Quality Control process for GWAShub.  
+2.  **Assess replication** by processing and comparing example datasets across different sites to ensure the replicability of the pipeline.  
+
+---
+
+## The Quality Control Pipeline
+
+The `hermes_docker` pipeline executes a multi-step QC protocol controlled by the main script [`run.sh`](https://github.com/nicksunderland/hermes_docker/blob/main/run.sh). Below is a detailed breakdown of the logic derived from the source code.
+
+### Step 1: Parsing, Standardization & Validation
+**Script:** [`01_parse_data.R`](https://github.com/nicksunderland/hermes_docker/blob/main/scripts/01_parse_data.R)  
+**Code-ref:** [`line 148`](https://github.com/nicksunderland/hermes_docker/blob/main/run.sh#L148)
+
+This step reads the raw GWAS summary statistics uploaded by the user, and a configuration JSON which is derived from the meta-data provided at file upload. It performs sanity checks and basic data fixes before data is converted to VCF format. VCF format is required for several of the downstream QC elements, such as the [gwas2vcf](https://mrcieu.github.io/gwas2vcf/) pipeline, developed as part of the MRC-IEU [OpenGWAS](https://opengwas.io/) project, and the [bcftools +liftover](https://academic.oup.com/bioinformatics/article/40/2/btae038/7585532) plugin which overcomes many of the limitations of other liftover tools, particularly for [indels](https://liftover.broadinstitute.org/). 
+
+#### 1. Column Schema Requirements
+The pipeline validates the existence of the following mapped columns:
+
+| Category | Required Columns |
+| :--- | :--- |
+| **Variant Identifiers** | `rsid`, `chr`, `pos` |
+| **Alleles** | `reference`, `alt` |
+| **Statistics** | `beta`, `stdErr`, `pval`, `eaf` |
+| **Sample/Info** | `n`, `ncase`, `ncontrol`, `imputed`, `info` |
+
+#### 2. Data Validation & Sanitization Rules
+The pipeline applies specific logic to clean and standardize the data:
+
+| Field | Validation Rule | Action / Transformation |
+| :--- | :--- | :--- |
+| **Chromosome** | Must be 1-24, X, Y | • Removes "chr" prefix if present <br> • Maps numeric `23` $\to$ `X` <br> • Maps numeric `24` $\to$ `Y` |
+| **Position** | Integer $> 0$ | Invalid non-integers or $\le 0$ are set to `NA` |
+| **Alleles** | A, C, T, G characters | • Converted to Uppercase <br> • Non-ACTG characters are set to `NA` |
+| **P-values** | $0 \le P \le 1$ | • Recodes $P=0$ to machine min (`.Machine$double.xmin`) <br> • Auto-calc: Recalculates from $\beta, SE$ if $-log_{10}P$ is detected |
+| **EAF** | $0 < \text{EAF} < 1$ | Values outside range set to `NA` |
+| **Beta** | $\text{abs}(\beta) < 20$ | Extreme effect sizes set to `NA` |
+| **Sample Size** (`n`) | Integer $> 0$ | If the input column is all `NA` or missing, value is filled from `meta$totalSampleSize` |
+| **Case/Control** | Integer $> 0$ | If the input column is all `NA`, `ncase` filled from `meta$cases`; `ncontrol` derived from total - cases |
+| **Missingness** | Essential data check | Rows Dropped if essential data (chr, pos, alleles, stats) is missing after the checks above |
+
+
+### Step 2: VCF Conversion
+**Tool:** [`gwas2vcf`](https://github.com/MRCIEU/gwas2vcf) (Python)  
+**Code-ref:** [`line 167`](https://github.com/nicksunderland/hermes_docker/blob/main/run.sh#L167)  
+
+The cleaned tabular data is converted into the Variant Call Format (VCF) using gwas2vcf. This harmonises the dataset against the reference human genome `fasta` file. The involves checking that alleles at the specified positions are valid, including [indels](https://github.com/MRCIEU/gwas2vcf/blob/f4790a502e9c2ab2322322f45fa86a3540a20e02/gwas.py#L75), and handles allele [flipping](https://github.com/MRCIEU/gwas2vcf/blob/f4790a502e9c2ab2322322f45fa86a3540a20e02/gwas.py#L49).
+
+* **Reference:** Uses `Homo_sapiens_assembly38_nochr.fasta` (or `human_g1k_v37.fasta` if the input build is Hg19).
+
+#### Conversion Metadata
+gwas2vcf tracks the harmonisation process and outputs the following metrics:
+
+| Metric | Description |
+| :--- | :--- |
+| `TotalVariants` | Total number of variants in the input file. |
+| `VariantsNotRead` | Variants skipped due to parsing errors or invalid format (minimised through the pre-processing in step 1). |
+| `HarmonisedVariants` | Variants successfully matched to the reference genome. |
+| `VariantsNotHarmonised` | Variants that could not be matched to the reference (mismatched alleles/positions). |
+| `SwitchedAlleles` | Variants where the Effect/Other alleles were swapped to match the reference orientation. |
+| `NormalisedVariants` | Indels that were normalized (e.g., parsimonious representation) to match the reference. |
+
+#### `gwas2vcf` call
+
+```{bash, asis=TRUE}
+python /gwas2vcf/main.py \
+    --data "$OUTPUT_PARSED_GWAS" \
+    --json "$OUTPUT_GWAS2VCF_JSON" \
+    --id "foo" \
+    --ref "$REF" \
+    --out "$OUTPUT_VCF" \
+    > "$OUTPUT_STEP2_SUMMARY" 2>&1
+```
+
+### Step 3: Liftover & Annotation
+**Tool:** [`bcftools`](https://anaconda.org/channels/bioconda/packages/bcftools/overview) [`+liftover`](https://anaconda.org/channels/bioconda/packages/bcftools-liftover-plugin/overview) plugin     
+**Code-ref:** [`line 187`](https://github.com/nicksunderland/hermes_docker/blob/main/run.sh#L187)  
+
+To ensure all datasets are meta-analysis ready, they are harmonized to **GRCh38**. This is because GRCh38 has the greatest coverage and results in the least amount of data loss. For example, nearly all of GRCh37 is represented in GRCh38, but the reverse is not true. This is simple to change should we want to continue with the original plan for a GRCh38 analysis.
+
+The pipeline utilizes specific resource files to bridge datasets to this standard:
+
+| File | Description | Action |
+| :--- | :--- | :--- |
+| `hg19ToHg38.over.chain.gz` | UCSC Chain File | **Liftover:** If the input is Hg19/GRCh37, `bcftools +liftover` uses this chain file to map coordinates to GRCh38. |
+| `dbSNP157_b38_clean.vcf.gz` | NCBI dbSNP 157 | **Annotation:** Updates `rsIDs` to the most current standard, ensuring variants are matched by position/allele rather than potentially outdated identifiers. |
+
+### Final Output Schema
+**Script:** [`04_qc_report.R`](https://github.com/nicksunderland/hermes_docker/blob/main/scripts/04_qc_report.R)  
+**Code-ref:** [`line 315`](https://github.com/nicksunderland/hermes_docker/blob/main/scripts/04_qc_report.R#L315)  
+
+The final pipeline output is a tab-separated value (TSV) file, harmonized to GRCh38 and annotated with the latest dbSNP identifiers.
+
+| Column | Description |
+| :--- | :--- |
+| `varid` | Variant ID [chr:pos_pmin(ea, oa)_pmax(ea, oa)] |
+| `rsid` | Variant ID (dbSNP b157) |
+| `chr` | Chromosome (GRCh38) |
+| `bp_b38` | Base Position (GRCh38) |
+| `oa` | Other Allele (Forward strand) |
+| `ea` | Effect Allele (Forward strand) |
+| `eaf` | Effect Allele Frequency |
+| `beta` | Effect Size |
+| `se` | Standard Error of the Beta |
+| `p` | P-value |
+| `n` | Total Sample Size (Obtained from metadata if missing) |
+| `ncase` | Number of cases for binary traits (Obtained from metadata if missing) |
+
+
+### Step 4: Reporting & Upload
+**Script:** [`04_qc_report.Rmd`](https://github.com/nicksunderland/hermes_docker/blob/main/scripts/04_qc_report.Rmd)  
+**Code-ref:** [`line 368`](https://github.com/nicksunderland/hermes_docker/blob/main/scripts/04_qc_report.R#L368)  
+
+The pipeline generates a HTML report containing:
+
+* Effect Allele Frequency (EAF) comparison against reference (gnomAD/1kG).  
+* P-Z plots.  
+* QQ plots to assess genomic inflation.  
+
+
+---
+
+## Replication Assessment
+
+### Getting Started
+This pipeline is containerized using Docker to ensure reproducibility across all operating systems.
+
+### 1. Prerequisites
+* **Docker Desktop:** Download and install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+    * **Mac (M1/M2/M3):** The pipeline is built for AMD64 architecture. You must include `--platform linux/amd64` in your run commands (already included in examples below).
+    * **Windows:** recommend using [WSL2 (Windows Subsystem for Linux)](https://learn.microsoft.com/en-us/windows/wsl/install) to run the Bash commands provided below.
+    * **Linux:** Ensure your user has permissions to run Docker commands (or use `sudo`).
+
+### 2. Download the Pipeline
+Pull the latest automated build from Docker Hub:
+
+```{bash}
+docker pull --platform linux/amd64 nicksunderland/hermes_docker:latest
+```
+
+### 3. Example Datasets
+The following datasets were processed at the Bristol site to validate the pipeline's replication capabilities:
+
+| Source | Phenotype | Ancestry | Sex | Filename |
+| :--- | :--- | :--- | :--- | :--- |
+| **UK Biobank** | Pheno1 | EUR | Mixed (Both) | `GWAS_UKB_Pheno1_PREV_MIX_EUR_BOTH_20250114_CJ.tsv.gz` | 
+| **All of Us** | Pheno1 | EUR | Mixed (Combo) | `aou_eur_p1_combo.tsv.gz` | 
+
+
+### 4. Configuration files
+GWASHub's meta data captures many variables, however the only variables of importance for the QC pipeline are `column_map`, `totalSampleSize`,`cases`, and `ancestry`. 
+
+A minimal config file is shown below:
+
+```{r show_config, echo=FALSE, eval=TRUE, results='asis', warning=FALSE}
+data_dir <- Sys.getenv("HERMES_DOCKER_DATA_DIR")
+raw_json <- readLines(file.path(data_dir, "data", "config_hermes_ukbb.json"))
+pretty_json <- jsonlite::prettify(paste(raw_json, collapse = "\n"))
+cat("```json\n")
+cat(as.character(pretty_json))
+cat("\n```")
+```
+
+### 5. Resources  
+Several resource files are required, including the reference fasta, dbSNP, and lift over chain files. To run this you will need to obtain the resource files. I'm trying to set up an AWS S3 bucket or similar so they are easy to download. 
+
+```{r resources_tree, warning=FALSE, message=FALSE, echo=FALSE, eval=TRUE}
+resource_dir <- file.path(data_dir, "resources")
+fs::dir_tree(resource_dir)
+```
+
+
+### 6. Run the QC 
+Running the QC for the **All Of US** dataset. 
+
+**Note:** This example assumes you are in the hermes_docker project root - change the data paths. The volume flags (-v) automatically map your local folders to the Docker container using `$HOME`.
+
+```{bash, eval=F}
+# pull latest docker image
+docker pull --platform linux/amd64 nicksunderland/hermes_docker:latest
+
+# define directories
+DATA_DIR="$HOME/git/hermes_docker/tests/data"
+RES_DIR="$HOME/git/hermes_docker/tests/resources"
+OUT_DIR="$HOME/git/hermes_docker/tests/output"
+TMP_DIR="$HOME/git/hermes_docker/tests/tmp"
+
+# create output and tmp directories if they don't exist
+mkdir -p "$TMP_DIR" "$OUT_DIR"
+
+# run the QC pipeline
+# Note: Input paths inside the container (/data/...) must match the mount points (:data)
+docker run --rm \
+    --platform linux/amd64 \
+    -v "$DATA_DIR":/data \
+    -v "$RES_DIR":/resources \
+    -v "$OUT_DIR":/output \
+    -v "$TMP_DIR":/tmp \
+    nicksunderland/hermes_docker:latest \
+    /data/aou_eur_p1_combo.tsv.gz \
+    /data/config_hermes_aou.json \
+    /resources \
+    /output/aou
+    
+# Optional: clean up tmp directory after run
+rm -rf "$TMP_DIR"
+```
+
+```{r run_docker, include=FALSE, message=FALSE, echo=FALSE, eval=F}
+cmd <- 'docker pull --platform linux/amd64 nicksunderland/hermes_docker:latest'
+system(cmd)
+cmd <- 'mkdir -p $HOME/git/hermes_docker/tests/tmp $HOME/git/hermes_docker/tests/output'
+system(cmd)
+cmd <- paste(
+  "docker run --rm",
+  "--platform linux/amd64",
+  "-v $HOME/git/hermes_docker/tests/data:/data",
+  "-v $HOME/git/hermes_docker/tests/resources:/resources",
+  "-v $HOME/git/hermes_docker/tests/output:/output",
+  "-v $HOME/git/hermes_docker/tests/tmp:/tmp",
+  "nicksunderland/hermes_docker:latest",
+  "/data/aou_eur_p1_combo.tsv.gz /data/config_hermes_aou.json /resources /output/aou"
+)
+system(cmd)
+cmd <- 'rm -rf $HOME/git/hermes_docker/tests/tmp'
+system(cmd)
+```
+
+### Results AOU (synthetic data for GitHub repository)  
+The output from the QC pipeline for the **AOU** file looks like this: 
+
+```{r output_tree, warning=FALSE, message=FALSE, echo=FALSE, eval=T}
+test <- "aou"
+output_dir <- file.path(data_dir, "output", test)
+fs::dir_tree(output_dir)
+```
+
+#### QC report
+The generated `html` report. 
+```{r html_report, out.width="100%", include=FALSE, eval=T}
+report_path <- file.path(data_dir, "output", test, "images", "gwas_report.html")
+screenshot_path <- file.path("man", "figures", paste0("report_preview_", test, ".png"))
+webshot(url = report_path, 
+          file = screenshot_path, 
+          vwidth = 1000, 
+          vheight = 4100, 
+          cliprect = "viewport")
+```
+<img src="man/figures/report_preview_aou.png" align="center" width="1000" alt="HTML report" />
+
+
+```{r run_docker2, include=FALSE, message=FALSE, echo=FALSE, eval=F}
+cmd <- 'docker pull --platform linux/amd64 nicksunderland/hermes_docker:latest'
+system(cmd)
+cmd <- 'mkdir -p $HOME/git/hermes_docker/tests/tmp $HOME/git/hermes_docker/tests/output'
+system(cmd)
+cmd <- paste(
+  "docker run --rm",
+  "--platform linux/amd64",
+  "-v $HOME/git/hermes_docker/tests/data:/data",
+  "-v $HOME/git/hermes_docker/tests/resources:/resources",
+  "-v $HOME/git/hermes_docker/tests/output:/output",
+  "-v $HOME/git/hermes_docker/tests/tmp:/tmp",
+  "nicksunderland/hermes_docker:latest",
+  "/data/GWAS_UKB_Pheno1_PREV_MIX_EUR_BOTH_20250114_CJ.tsv.gz /data/config_hermes_ukbb.json /resources /output/ukbb"
+)
+system(cmd)
+cmd <- 'rm -rf $HOME/git/hermes_docker/tests/tmp'
+system(cmd)
+```
+
+### Results UKBB (synthetic data for GitHub repository)  
+The output from the QC pipeline for the **UK Biobank** file looks like this: 
+
+```{r output_tree2, warning=FALSE, message=FALSE, echo=FALSE, eval=T}
+test <- "ukbb"
+output_dir <- file.path(data_dir, "output", test)
+fs::dir_tree(output_dir)
+```
+
+#### QC report
+The generated `html` report. 
+```{r html_report2, out.width="100%", include=FALSE, eval=T}
+report_path <- file.path(data_dir, "output", test, "images", "gwas_report.html")
+screenshot_path <- file.path("man", "figures", paste0("report_preview_", test, ".png"))
+webshot(url = report_path, 
+          file = screenshot_path, 
+          vwidth = 1000, 
+          vheight = 4100, 
+          cliprect = "viewport")
+```
+<img src="man/figures/report_preview_ukbb.png" align="center" width="1000" alt="HTML report" />

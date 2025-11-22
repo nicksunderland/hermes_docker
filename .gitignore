@@ -1,5 +1,10 @@
 tests/data
 tests/output
 tests/resources
+tests/tmp
 .idea
 docker_build.log
+.Rproj.user
+.Rhistory
+hermes_docker.Rproj
+.DS_Store

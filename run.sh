@@ -3,22 +3,23 @@ set -euo pipefail
 
 show_help() {
   cat << EOF
-Usage: $(basename "$0") <s3-data-path> <json-path> <resources-dir> <file-guid>
+Usage: $(basename "$0") <data-path> <json-path> <resources-dir> <file-guid>
 
 Description:
   This script runs the Hermes QC job using the specified input data and configuration.
 
 Arguments:
-  <s3-data-path>     Path to the input data on S3 (e.g., s3://bucket/path/data.csv)
+  <data-path>        Path to the input data (e.g., ~/Desktop/data.tsv, or, s3://bucket/path/data.csv)
   <json-path>        Path to the JSON config file
   <resources-dir>    Local or S3 path to the resources directory
-  <file-guid>        Unique file GUID or identifier
+  <file-guid>        Unique output file GUID or identifier
 
 Options:
   -h, --help         Show this help message and exit
 
 Examples:
-  $(basename "$0") s3://my-bucket/input.json config.json ./resources abc123
+  $(basename "$0") s3://my-bucket/input.tsv.gz config.json ./resources abc123
+  $(basename "$0") ~/Desktop/data.tsv config.json ./resources abc123
 EOF
 }
 
@@ -36,16 +37,16 @@ if [[ $# -lt 4 ]]; then
 fi
 
 # Arguments passed to the script
-S3_DATA_PATH="$1"
+DATA_PATH="$1"
 JSON_PATH="$2"
 RESOURCES_DIR="$3"
 FILE_GUID="$4"
 
 echo "=== RUN INPUT ==="
-echo "S3_PATH file path:    $S3_DATA_PATH"
+echo "GWAS file path:       $DATA_PATH"
 echo "JSON file path:       $JSON_PATH"
 echo "Resources directory:  $RESOURCES_DIR"
-echo "File guid:            $FILE_GUID"
+echo "File output / guid:   $FILE_GUID"
 echo "================="
 
 
@@ -63,24 +64,78 @@ download_or_copy() {
     local src="$1"
     local dest="$2"
     if [[ "$src" == s3://* ]]; then
+        # S3 - Must download to /tmp
         aws s3 cp "$src" "$dest" --no-progress
     else
         cp "$src" "$dest"
     fi
 }
+setup_resource() {
+    local file_name="$1"
+    if [[ "$RESOURCES_DIR" == s3://* ]]; then
+        local local_dest="/tmp/resources/$file_name"
+        mkdir -p "/tmp/resources"
+        download_or_copy "$RESOURCES_DIR/$file_name" "$local_dest"
+        echo "$local_dest"
+    else
+        echo "${RESOURCES_DIR}/${file_name}"
+    fi
+}
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+validate_output() {
+    local file="$1"
+    local step="$2"
+    if [[ ! -s "$file" ]]; then 
+        log "CRITICAL ERROR: ${step} failed to produce output."
+        echo "Missing or empty file: $file"
+        exit 1
+    else
+        log "SUCCESS: ${step} verified output: $file"
+    fi
+}
+ensure_unzipped() {
+    local gz_path="$1"     # The path to the .gz file (e.g., /resources/ref.fasta.gz)
+    local unz_path="$2"    # The path where we expect the unzipped file (e.g., /resources/ref.fasta)
+    # 1. If the unzipped file already exists at the source (e.g. mounted), use it
+    if [[ -f "$unz_path" ]]; then
+        echo "$unz_path"
+        return
+    fi
+    # 2. If unzipped doesn't exist, we must unzip the GZ file to /tmp/scratch
+    local scratch_dest
+    scratch_dest="/tmp/$(basename "$unz_path")"
+    # Check if we already unzipped it in a previous run/step
+    if [[ -f "$scratch_dest" ]]; then
+        echo "$scratch_dest"
+        return
+    fi
+    log "Unzipping $(basename "$gz_path") to /tmp..." >&2
+    # Decompress to stdout > destination to handle read-only source mounts
+    gzip -dc "$gz_path" > "$scratch_dest"
+    echo "$scratch_dest"
 }
 
 #########################################
 # SETUP FILES
 #########################################
 LOCAL_GWAS_FILE="/tmp/input_gwas.tsv.gz"
-LOCAL_RESOURCES="/tmp/resources"
 LOCAL_OUTPUT="/tmp/output"
-mkdir -p "$LOCAL_RESOURCES" "$LOCAL_OUTPUT"
+mkdir -p "$LOCAL_OUTPUT"
 
-# Load genome build from JSON file (or string)
+# -------------------------------------------------------
+# 1. DEFINE RESOURCE PATHS
+# -------------------------------------------------------
+# Reference and resource files
+EAF_PATH=$(setup_resource "all_afreq_b38.tsv.gz")
+FASTA_38_PATH=$(setup_resource "Homo_sapiens_assembly38_nochr.fasta.gz")
+FASTA_38_UNZ_TARGET=$(setup_resource "Homo_sapiens_assembly38_nochr.fasta") # might not exist yet
+DBSNP_PATH=$(setup_resource "dbSNP157_b38_clean.vcf.gz")
+
+# -------------------------------------------------------
+# 2. HANDLE GENOME BUILD
+# -------------------------------------------------------
 log "Getting GWAS build"
 BUILD=$(python -c "
 import json, os
@@ -102,38 +157,22 @@ print(data.get('referenceGenome', ''))
 if [[ -z "$BUILD" ]]; then
     echo 'ERROR: Could not extract referenceGenome from JSON_PATH'
     exit 1
+else
+    log "Detected build: $BUILD"
 fi
 
-# Reference and resource files
-EAF="all_afreq_b38.tsv.gz"
-FASTA_37="human_g1k_v37.fasta.gz"
-FASTA_37_UNZ="human_g1k_v37.fasta"
-FASTA_38="Homo_sapiens_assembly38_nochr.fasta.gz"
-FASTA_38_UNZ="Homo_sapiens_assembly38_nochr.fasta"
-CHAIN_37_38="hg19ToHg38.over.chain.gz"
-DBSNP_38="dbSNP157_b38_clean.vcf.gz"
-
-# Download or copy input files
-log "Getting GWAS input"
-download_or_copy "$S3_DATA_PATH" "$LOCAL_GWAS_FILE"
-
-log "Getting resource files"
-download_or_copy "$RESOURCES_DIR/$EAF" "$LOCAL_RESOURCES/$EAF"
-download_or_copy "$RESOURCES_DIR/$FASTA_38" "$LOCAL_RESOURCES/$FASTA_38"
-download_or_copy "$RESOURCES_DIR/$FASTA_38_UNZ.fai" "$LOCAL_RESOURCES/${FASTA_38_UNZ}.fai"
-download_or_copy "$RESOURCES_DIR/$DBSNP_38" "$LOCAL_RESOURCES/$DBSNP_38"
-download_or_copy "$RESOURCES_DIR/$DBSNP_38.tbi" "$LOCAL_RESOURCES/${DBSNP_38}.tbi"
-
+# update paths based on build
 if [[ "$BUILD" == "Hg19" ]]; then
-    log "Getting Hg19 resources for liftover"
-    download_or_copy "$RESOURCES_DIR/$CHAIN_37_38" "$LOCAL_RESOURCES/$CHAIN_37_38"
-    download_or_copy "$RESOURCES_DIR/$FASTA_37" "$LOCAL_RESOURCES/$FASTA_37"
-    download_or_copy "$RESOURCES_DIR/$FASTA_37_UNZ.fai" "$LOCAL_RESOURCES/${FASTA_37_UNZ}.fai"
+  CHAIN_PATH=$(setup_resource "hg19ToHg38.over.chain.gz")
+  FASTA_37_PATH=$(setup_resource "human_g1k_v37.fasta.gz")
+  FASTA_37_UNZ_TARGET=$(setup_resource "human_g1k_v37.fasta") # might not exist yet
 fi
 
-# Uncompress FASTA files
-gzip -dk "$LOCAL_RESOURCES/$FASTA_38"
-[[ "$BUILD" == "Hg19" ]] && gzip -dk "$LOCAL_RESOURCES/$FASTA_37"
+# -------------------------------------------------------
+# 3. GET INPUT DATA
+# -------------------------------------------------------
+log "Getting GWAS input"
+download_or_copy "$DATA_PATH" "$LOCAL_GWAS_FILE"
 
 
 #########################################
@@ -151,6 +190,9 @@ Rscript /scripts/01_parse_data.R \
   "$OUTPUT_PARSED_GWAS" \
   "$OUTPUT_GWAS2VCF_JSON" \
   "$OUTPUT_STEP1_SUMMARY"
+  
+validate_output "$OUTPUT_PARSED_GWAS" "Step 1 (QC Parse)"
+validate_output "$OUTPUT_GWAS2VCF_JSON" "Step 1 (JSON Generation)"
 
 
 #########################################
@@ -161,16 +203,20 @@ log "Running Step 2 gwas2vcf"
 OUTPUT_VCF="${LOCAL_OUTPUT}/gwas.vcf.gz"
 OUTPUT_STEP2_SUMMARY="${LOCAL_OUTPUT}/step2_summary.tsv"
 
-REF="$LOCAL_RESOURCES/$FASTA_38_UNZ"
-[[ "$BUILD" == "Hg19" ]] && REF="$LOCAL_RESOURCES/$FASTA_37_UNZ"
+REF=$(ensure_unzipped "$FASTA_38_PATH" "$FASTA_38_UNZ_TARGET")
+if [[ "$BUILD" == "Hg19" ]]; then
+    REF=$(ensure_unzipped "$FASTA_37_PATH" "$FASTA_37_UNZ_TARGET")
+fi
 
 python /gwas2vcf/main.py \
     --data "$OUTPUT_PARSED_GWAS" \
     --json "$OUTPUT_GWAS2VCF_JSON" \
-    --id "foo" \
+    --id "gwas_qc_pipeline" \
     --ref "$REF" \
     --out "$OUTPUT_VCF" \
-    > "$OUTPUT_STEP2_SUMMARY" 2>&1
+    2>&1 | tee "$OUTPUT_STEP2_SUMMARY"
+    
+validate_output "$OUTPUT_VCF" "Step 2 (gwas2vcf conversion)"
 
 
 #########################################
@@ -178,18 +224,23 @@ python /gwas2vcf/main.py \
 #########################################
 activate_conda hermes
 log "Running Step 3 bcftools liftover & annotate"
-DBSNP="$LOCAL_RESOURCES/$DBSNP_38"
+DBSNP="$DBSNP_PATH"
 CORES=$(nproc)
 OUTPUT_VCF_B38="${LOCAL_OUTPUT}/gwas_b38.vcf.gz"
 OUTPUT_STEP3_SUMMARY="${LOCAL_OUTPUT}/step3_summary.tsv"
 
 if [[ "$BUILD" == "Hg19" ]]; then
+
+    REF_37=$(ensure_unzipped "$FASTA_37_PATH" "$FASTA_37_UNZ_TARGET")
+    REF_38=$(ensure_unzipped "$FASTA_38_PATH" "$FASTA_38_UNZ_TARGET")
+
     bcftools +liftover "$OUTPUT_VCF" \
-        -- -s "$LOCAL_RESOURCES/$FASTA_37_UNZ" \
-        -f "$LOCAL_RESOURCES/$FASTA_38_UNZ" \
-        -c "$LOCAL_RESOURCES/$CHAIN_37_38" \
+        -- -s "$REF_37" \
+        -f "$REF_38" \
+        -c "$CHAIN_PATH" \
         2>> "$OUTPUT_STEP3_SUMMARY" \
         | bcftools view -Oz -o "$OUTPUT_VCF_B38.tmp.gz" -
+
     bcftools sort -Oz -o "$OUTPUT_VCF_B38.tmp.sorted.gz" "$OUTPUT_VCF_B38.tmp.gz"
     mv "$OUTPUT_VCF_B38.tmp.sorted.gz" "$OUTPUT_VCF_B38.tmp.gz"
 else
@@ -207,14 +258,15 @@ bcftools annotate -a "$DBSNP" -c ID -O z --threads "$CORES" \
 rm -f "$OUTPUT_VCF_B38.tmp.gz" "$OUTPUT_VCF_B38.tmp.gz.csi"
 
 bcftools index -f --csi "$OUTPUT_VCF_B38"
-log "Step 3 completed"
+
+validate_output "$OUTPUT_VCF_B38" "Step 3 (Liftover & Annotation)"
 
 
 #########################################
 # STEP 4: Reporting
 #########################################
 log "Running QC Step 4 reporting"
-EAF_REF="$LOCAL_RESOURCES/$EAF"
+EAF_REF="$EAF_PATH"
 OUTPUT_CLEAN_GWAS="${LOCAL_OUTPUT}/gwas_b38_clean.tsv.gz"
 OUTPUT_REPORT="${LOCAL_OUTPUT}/gwas_report.html"
 
@@ -228,6 +280,9 @@ Rscript /scripts/04_qc_report.R \
     "/scripts/04_qc_report.Rmd" \
     "$OUTPUT_CLEAN_GWAS" \
     "$OUTPUT_REPORT"
+    
+validate_output "$OUTPUT_CLEAN_GWAS" "Step 4 (Cleaned GWAS TSV)"
+validate_output "$OUTPUT_REPORT" "Step 4 (HTML Report)"
 
 
 #########################################
@@ -244,7 +299,7 @@ if [[ ! -f "$OUTPUT_CLEAN_GWAS" ]]; then
 fi
 
 # If FILE_GUID looks like a directory, use local mode; otherwise assume S3 upload
-if [[ -d "$FILE_GUID" ]]; then
+if [[ "$FILE_GUID" == /* || "$FILE_GUID" == ./* || -d "$FILE_GUID" ]]; then
     log "Detected local output path — copying locally"
     mkdir -p "$FILE_GUID/images" "$FILE_GUID/tables"
 

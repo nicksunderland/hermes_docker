@@ -1,14 +1,21 @@
+docker pull --platform linux/amd64 nicksunderland/hermes_docker:latest
+DATA_DIR="$HOME/git/hermes_docker/tests/data"
+RES_DIR="$HOME/git/hermes_docker/tests/resources"
+OUT_DIR="$HOME/git/hermes_docker/tests/output"
+TMP_DIR="$HOME/git/hermes_docker/tests/tmp"
+mkdir -p "$TMP_DIR" "$OUT_DIR"
 docker run --rm \
-  --memory=24g \
-  --memory-swap=24g \
-  -v /Users/xx20081/git/hermes_docker/tests/data:/data \
-  -v /Users/xx20081/git/hermes_docker/tests/resources:/resources \
-  -v /Users/xx20081/git/hermes_docker/tests/output:/output \
+  --platform linux/amd64 \
+  -v "$DATA_DIR":/data \
+  -v "$RES_DIR":/resources \
+  -v "$OUT_DIR":/output \
+  -v "$TMP_DIR":/tmp \
   nicksunderland/hermes_docker:latest \
   /data/test_data.tsv.gz \
   /data/config.json \
   /resources \
-  /output
+  /output/test_output
+rm -rf "$TMP_DIR"
 
 
 # server command ???

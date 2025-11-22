@@ -15,8 +15,8 @@ step1_summary <- args[5]
 
 # testing ====
 if (FALSE) {
-  gwas_file     = '/Users/xx20081/git/hermes_docker/tests/data/test_data.tsv.gz'
-  meta_file     = '/Users/xx20081/git/hermes_docker/tests/data/config.json'
+  gwas_file     = '/Users/xx20081/git/hermes_docker/tests/data/aou_eur_p1_combo.tsv.gz'
+  meta_file     = '/Users/xx20081/git/hermes_docker/tests/data/config_hermes_aou.json'
   parsed_gwas   = '/Users/xx20081/git/hermes_docker/tests/output/test_data_parsed.tsv.gz'
   gwas2vcf_json = '/Users/xx20081/git/hermes_docker/tests/output/test_gwas2vcf.json'
   step1_summary = '/Users/xx20081/git/hermes_docker/tests/output/test_summary1.txt'
@@ -68,22 +68,39 @@ print(summary)
 #=============================================================================
 cat("checking data validity\n")
 
+# numeric checker
+check_num <- function(x, 
+                      lb = -Inf, ub = Inf,        
+                      lb_incl = FALSE, ub_incl = FALSE,
+                      is_int = FALSE) {
+  val <- suppressWarnings(as.numeric(x))
+  res <- !is.na(val) & is.finite(val)
+  if (lb_incl) res <- res & val >= lb
+  else         res <- res & val >  lb
+  if (ub_incl) res <- res & val <= ub
+  else         res <- res & val <  ub
+  if (is_int) {
+    res <- res & (abs(val - round(val)) < .Machine$double.eps^0.5)
+  }
+  return(res)
+}
+
 # per column functions that return true if that row is valid
 col_fn_list <- list(
   rsid      = function(x) grepl("^rs[0-9]+|^[0-9]+:[0-9]+.*", x),
   chr       = function(x) x %in% c(as.character(1:22), "X", "Y"),
-  pos       = function(x) is.integer(x) & x > 0,
+  pos       = function(x) check_num(x, lb=0, lb_incl=F, is_int=T),
   alt       = function(x) grepl("^[ACTG]+$", x),
   reference = function(x) grepl("^[ACTG]+$", x),
-  eaf       = function(x) is.numeric(x) & x > 0 & x < 1,
-  beta      = function(x) is.numeric(x) & is.finite(x) & abs(x) < 20,
-  stdErr    = function(x) is.numeric(x) & x > 0 & is.finite(x),
-  pval      = function(x) is.numeric(x) & x >= 0 & x <=1,
-  n         = function(x) is.integer(x) & x > 0,
-  ncase     = function(x) is.integer(x) & x > 0,
-  ncontrol  = function(x) is.integer(x) & x > 0,
-  imputed   = function(x) is.logical(x) & !is.na(x),
-  info      = function(x) is.numeric(x) & x >= 0 & x <=1
+  eaf       = function(x) check_num(x, lb=0, ub=1),
+  beta      = function(x) check_num(x, lb=-20, ub=20),
+  stdErr    = function(x) check_num(x, lb=0),
+  pval      = function(x) check_num(x, lb=0, ub=1, lb_incl=T, ub_incl=T),
+  n         = function(x) check_num(x, lb=0, is_int=T),
+  ncase     = function(x) check_num(x, lb=0, is_int=T),
+  ncontrol  = function(x) check_num(x, lb=0, is_int=T),
+  imputed   = function(x) !is.na(x) & x %in% list(TRUE, FALSE, 0, 1),
+  info      = function(x) check_num(x, lb=0, ub=1, lb_incl=T, ub_incl = T)
 )
 
 # apply the functions to the corresponding columns and create summary table
@@ -114,6 +131,21 @@ gwas[, chr := fcase(chr %in% ok_chrom, chr,
                     chr == "23",       "X",
                     chr == "24",       "Y",
                     default = NA_character_)]
+
+#=============================================================================
+# Pre-processing: Handle censored N values (e.g., "<=40")
+#=============================================================================
+cat("handling censored values in sample size columns\n")
+
+n_cols <- c("n", "ncase", "ncontrol")
+for (col in n_cols) {
+  if (col %in% names(gwas)) {
+    if (is.character(gwas[[col]])) {
+      cat(sprintf("\t - cleaning column '%s' (removing '<=' etc)\n", col))
+      gwas[, (col) := gsub("[^0-9.]", "", get(col))]
+    }
+  }
+}
 
 # parse base position and n-sample columns to integer
 integer_cols <- c("pos", "n", "ncase", "ncontrol")
@@ -159,7 +191,7 @@ for (col in allele_cols) {
     gwas[!col_fn_list[[col]](get(col)), (col) := NA_character_]
 }
 
-# find indels and and number to summary, remove indels if flag specified
+# find indels and and number to summary
 indel_idx <- which(nchar(gwas$alt) > 1 | nchar(gwas$reference) > 1)
 summary[grep("^(alt|reference)$", column), indels := length(indel_idx)]
 
@@ -199,10 +231,23 @@ json_data <- list(
   eaf_col       = which(names(gwas) == "eaf") - 1,
   delimiter     = "\t",
   header        = TRUE,
-  build         = fcase(grepl("hg19|b37", meta$referenceGenome, ignore.case=T), "GRCh37",
-                        grepl("hg38|b38", meta$referenceGenome, ignore.case=T), "GRCh38",
-                        default = NA_character_)
+  build         = fcase(
+    grepl("hg[-_.]?19|grch[-_.]?37|b(uild)?[-_.]?37|ncbi[-_.]?37", meta$referenceGenome, ignore.case = TRUE), "GRCh37",
+    grepl("hg[-_.]?38|grch[-_.]?38|b(uild)?[-_.]?38|ncbi[-_.]?38", meta$referenceGenome, ignore.case = TRUE), "GRCh38",
+    default = NA_character_
+  )
 )
+
+# check we created a valid file
+if (is.na(json_data$build)) {
+  stop(paste0("ERROR: Could not determine Genome Build from metadata string: '", meta$referenceGenome, "'"))
+}
+
+missing_indices <- names(json_data)[sapply(json_data, length) == 0]
+if (length(missing_indices) > 0) {
+  stop(paste0("ERROR: The following required columns were missing from the parsed GWAS data object when creating the JSON map: ", 
+              paste(missing_indices, collapse = ", ")))
+}
 
 # write JSON to disk
 jsonlite::write_json(json_data, path = gwas2vcf_json, auto_unbox = TRUE, pretty = TRUE)
