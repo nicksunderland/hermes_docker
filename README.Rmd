@@ -46,7 +46,7 @@ The `hermes_docker` pipeline executes a multi-step QC protocol controlled by the
 
 ### Step 1: Parsing, Standardization & Validation
 **Script:** [`01_parse_data.R`](https://github.com/nicksunderland/hermes_docker/blob/main/scripts/01_parse_data.R)  
-**Code-ref:** [`line 148`](https://github.com/nicksunderland/hermes_docker/blob/main/run.sh#L148)
+**Code-ref:** [`line 148`](https://github.com/nicksunderland/hermes_docker/blob/3d6adef5c31964c103adac766f816627bab2d23c/run.sh#L187)
 
 This step reads the raw GWAS summary statistics uploaded by the user, and a configuration JSON which is derived from the meta-data provided at file upload. It performs sanity checks and basic data fixes before data is converted to VCF format. VCF format is required for several of the downstream QC elements, such as the [gwas2vcf](https://mrcieu.github.io/gwas2vcf/) pipeline, developed as part of the MRC-IEU [OpenGWAS](https://opengwas.io/) project, and the [bcftools +liftover](https://academic.oup.com/bioinformatics/article/40/2/btae038/7585532) plugin which overcomes many of the limitations of other liftover tools, particularly for [indels](https://liftover.broadinstitute.org/). 
 
@@ -78,7 +78,7 @@ The pipeline applies specific logic to clean and standardize the data:
 
 ### Step 2: VCF Conversion
 **Tool:** [`gwas2vcf`](https://github.com/MRCIEU/gwas2vcf) (Python)  
-**Code-ref:** [`line 167`](https://github.com/nicksunderland/hermes_docker/blob/main/run.sh#L167)  
+**Code-ref:** [`line 167`](https://github.com/nicksunderland/hermes_docker/blob/3d6adef5c31964c103adac766f816627bab2d23c/run.sh#L211)  
 
 The cleaned tabular data is converted into the Variant Call Format (VCF) using gwas2vcf. This harmonises the dataset against the reference human genome `fasta` file. The involves checking that alleles at the specified positions are valid, including [indels](https://github.com/MRCIEU/gwas2vcf/blob/f4790a502e9c2ab2322322f45fa86a3540a20e02/gwas.py#L75), and handles allele [flipping](https://github.com/MRCIEU/gwas2vcf/blob/f4790a502e9c2ab2322322f45fa86a3540a20e02/gwas.py#L49).
 
@@ -96,21 +96,10 @@ gwas2vcf tracks the harmonisation process and outputs the following metrics:
 | `SwitchedAlleles` | Variants where the Effect/Other alleles were swapped to match the reference orientation. |
 | `NormalisedVariants` | Indels that were normalized (e.g., parsimonious representation) to match the reference. |
 
-#### `gwas2vcf` call
-
-```{bash, asis=TRUE}
-python /gwas2vcf/main.py \
-    --data "$OUTPUT_PARSED_GWAS" \
-    --json "$OUTPUT_GWAS2VCF_JSON" \
-    --id "foo" \
-    --ref "$REF" \
-    --out "$OUTPUT_VCF" \
-    > "$OUTPUT_STEP2_SUMMARY" 2>&1
-```
 
 ### Step 3: Liftover & Annotation
 **Tool:** [`bcftools`](https://anaconda.org/channels/bioconda/packages/bcftools/overview) [`+liftover`](https://anaconda.org/channels/bioconda/packages/bcftools-liftover-plugin/overview) plugin     
-**Code-ref:** [`line 187`](https://github.com/nicksunderland/hermes_docker/blob/main/run.sh#L187)  
+**Code-ref:** [`line 187`](https://github.com/nicksunderland/hermes_docker/blob/3d6adef5c31964c103adac766f816627bab2d23c/run.sh#L237)  
 
 To ensure all datasets are meta-analysis ready, they are harmonized to **GRCh38**. This is because GRCh38 has the greatest coverage and results in the least amount of data loss. For example, nearly all of GRCh37 is represented in GRCh38, but the reverse is not true. This is simple to change should we want to continue with the original plan for a GRCh38 analysis.
 

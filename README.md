@@ -50,7 +50,7 @@ Below is a detailed breakdown of the logic derived from the source code.
 **Script:**
 [`01_parse_data.R`](https://github.com/nicksunderland/hermes_docker/blob/main/scripts/01_parse_data.R)  
 **Code-ref:**
-[`line 148`](https://github.com/nicksunderland/hermes_docker/blob/main/run.sh#L148)
+[`line 148`](https://github.com/nicksunderland/hermes_docker/blob/3d6adef5c31964c103adac766f816627bab2d23c/run.sh#L187)
 
 This step reads the raw GWAS summary statistics uploaded by the user,
 and a configuration JSON which is derived from the meta-data provided at
@@ -95,7 +95,7 @@ The pipeline applies specific logic to clean and standardize the data:
 
 **Tool:** [`gwas2vcf`](https://github.com/MRCIEU/gwas2vcf) (Python)  
 **Code-ref:**
-[`line 167`](https://github.com/nicksunderland/hermes_docker/blob/main/run.sh#L167)
+[`line 167`](https://github.com/nicksunderland/hermes_docker/blob/3d6adef5c31964c103adac766f816627bab2d23c/run.sh#L211)
 
 The cleaned tabular data is converted into the Variant Call Format (VCF)
 using gwas2vcf. This harmonises the dataset against the reference human
@@ -122,18 +122,6 @@ metrics:
 | `SwitchedAlleles` | Variants where the Effect/Other alleles were swapped to match the reference orientation. |
 | `NormalisedVariants` | Indels that were normalized (e.g., parsimonious representation) to match the reference. |
 
-#### `gwas2vcf` call
-
-``` bash
-python /gwas2vcf/main.py \
-    --data "$OUTPUT_PARSED_GWAS" \
-    --json "$OUTPUT_GWAS2VCF_JSON" \
-    --id "foo" \
-    --ref "$REF" \
-    --out "$OUTPUT_VCF" \
-    > "$OUTPUT_STEP2_SUMMARY" 2>&1
-```
-
 ### Step 3: Liftover & Annotation
 
 **Tool:**
@@ -141,7 +129,7 @@ python /gwas2vcf/main.py \
 [`+liftover`](https://anaconda.org/channels/bioconda/packages/bcftools-liftover-plugin/overview)
 plugin  
 **Code-ref:**
-[`line 187`](https://github.com/nicksunderland/hermes_docker/blob/main/run.sh#L187)
+[`line 187`](https://github.com/nicksunderland/hermes_docker/blob/3d6adef5c31964c103adac766f816627bab2d23c/run.sh#L237)
 
 To ensure all datasets are meta-analysis ready, they are harmonized to
 **GRCh38**. This is because GRCh38 has the greatest coverage and results
