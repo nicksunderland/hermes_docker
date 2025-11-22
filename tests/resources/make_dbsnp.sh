@@ -4,9 +4,9 @@
 
 set -euo pipefail  # safer bash behavior
 
-# target directory
-mkdir -p /myriadfs/projects/mol_cardio/data/genome_references/dbsnp/build38_157
-cd /myriadfs/projects/mol_cardio/data/genome_references/dbsnp/build38_157
+# set a target directory
+mkdir -p "$HOME/resources"
+cd "$HOME/resources"
 
 # download files
 wget -c https://ftp.ncbi.nih.gov/snp/archive/b157/VCF/GCF_000001405.40.gz
