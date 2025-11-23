@@ -135,7 +135,7 @@ To ensure all datasets are meta-analysis ready, they are harmonized to
 **GRCh38**. This is because GRCh38 has the greatest coverage and results
 in the least amount of data loss. For example, nearly all of GRCh37 is
 represented in GRCh38, but the reverse is not true. This is simple to
-change should we want to continue with the original plan for a GRCh38
+change should we want to continue with the original plan for a GRCh37
 analysis.
 
 The pipeline utilizes specific resource files to bridge datasets to this
@@ -180,8 +180,7 @@ harmonized to GRCh38 and annotated with the latest dbSNP identifiers.
 
 The pipeline generates a HTML report containing:
 
-- Effect Allele Frequency (EAF) comparison against reference
-  (gnomAD/1kG).  
+- Effect Allele Frequency (EAF) comparison against reference (1kG).  
 - P-Z plots.  
 - QQ plots to assess genomic inflation.
 
@@ -209,7 +208,7 @@ across all operating systems.
 
 ### 2. Download the Pipeline
 
-Pull the latest automated build from Docker Hub:
+Pull the latest build from Docker Hub:
 
 ``` bash
 docker pull --platform linux/amd64 nicksunderland/hermes_docker:latest
@@ -263,17 +262,24 @@ A minimal config file is shown below:
 Several resource files are required, including the reference fasta,
 dbSNP, and lift over chain files. To run this you will need to obtain
 the resource files. I’m trying to set up an AWS S3 bucket or similar so
-they are easy to download.
+they are easy to download, but you could also try to generate them using
+the scripts under
+[`tests/resources`](https://github.com/nicksunderland/hermes_docker/tree/main/tests/resources).
 
     #> /Users/xx20081/git/hermes_docker/tests/resources
     #> ├── Homo_sapiens_assembly38_nochr.fasta.fai
     #> ├── Homo_sapiens_assembly38_nochr.fasta.gz
+    #> ├── README.txt
     #> ├── all_afreq_b38.tsv.gz
     #> ├── dbSNP157_b38_clean.vcf.gz
     #> ├── dbSNP157_b38_clean.vcf.gz.tbi
     #> ├── hg19ToHg38.over.chain.gz
     #> ├── human_g1k_v37.fasta.fai
-    #> └── human_g1k_v37.fasta.gz
+    #> ├── human_g1k_v37.fasta.gz
+    #> ├── make_afreq.R
+    #> ├── make_chain.sh
+    #> ├── make_dbsnp.sh
+    #> └── make_fasta.sh
 
 ### 6. Run the QC
 
