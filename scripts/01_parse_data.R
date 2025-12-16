@@ -130,6 +130,9 @@ ok_chrom <- c(as.character(1:22), "X", "Y")
 gwas[, chr := fcase(chr %in% ok_chrom, chr,
                     chr == "23",       "X",
                     chr == "24",       "Y",
+                    chr == "25",       "X",
+                    chr == "PAR",      "X",
+                    chr == "XY",       "X",
                     default = NA_character_)]
 
 # check chromosome coverage
