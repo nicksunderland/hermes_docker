@@ -169,8 +169,22 @@ gwas[, (integer_cols) := lapply(.SD, as.integer), .SDcols = integer_cols]
 
 # if total N is NA, then set to N in the meta-data
 gwas[is.na(n), n := meta$totalSampleSize]
-gwas[is.na(ncase), ncase := meta$cases]
-gwas[is.na(ncontrol), ncontrol := meta$totalSampleSize - meta$cases]
+
+# infer trait type from data if metadata is absent/uncertain
+ncase_non_na <- mean(!is.na(gwas$ncase))
+nctrl_non_na <- mean(!is.na(gwas$ncontrol))
+is_continuous <- (is.null(meta$cases) || is.na(meta$cases)) &&
+  (ncase_non_na < 0.1 && nctrl_non_na < 0.1)
+
+# ... existing NA fill for n, ncase, ncontrol ...
+if (!is_continuous) {
+  cat("[i] Treating as case-control (cases metadata or substantial ncase/ncontrol present)\n")
+  gwas[is.na(ncase), ncase := meta$cases]
+  gwas[is.na(ncontrol), ncontrol := meta$totalSampleSize - meta$cases]
+} else {
+  cat(sprintf("[i] Treating as continuous: only %.1f%% ncase and %.1f%% ncontrol filled\n",
+              100 * ncase_non_na, 100 * nctrl_non_na))
+}
 
 # apply integer filters
 for (col in integer_cols) {
@@ -192,7 +206,7 @@ if (length(eaf_vals)) {
     cat(sprintf("[!] EAF likely 0–100 (%.1f%% of finite values); scaling to 0–1\n", 100 * pct_gt1_lt100))
     gwas[, eaf := eaf / 100]
   } else {
-    cat(sprintf("[i] EAF appears 0–1 (%.1f%% ≤1); leaving as-is\n", 100 * pct_le1))
+    cat("[i] EAF appears 0–1; leaving as-is\n")
   }
 }
 
@@ -232,7 +246,8 @@ summary <- cbind(summary,
                             postfix_valid_pct = sapply(postfix_na_summary, `[[`, 2)))
 
 # remove invalid rows (those containing NAs)
-essential_cols  <- c("chr", "pos", "alt", "reference", "eaf", "beta", "stdErr", "pval", "n", "ncase", "ncontrol")
+essential_cols <- c("chr", "pos", "alt", "reference", "eaf", "beta", "stdErr", "pval", "n")
+if (!is_continuous) essential_cols <- c(essential_cols, "ncase", "ncontrol")
 na_variants <- gwas[!stats::complete.cases(gwas[, mget(essential_cols)]) ]
 gwas        <- gwas[ stats::complete.cases(gwas[, mget(essential_cols)]) ]
 
