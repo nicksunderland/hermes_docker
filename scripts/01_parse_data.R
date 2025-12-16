@@ -168,6 +168,18 @@ if ("log10p" %in% names(gwas)) {
 }
 gwas[, (numeric_cols) := lapply(.SD, as.numeric), .SDcols = numeric_cols]
 
+# detect 0–100 frequencies and rescale only if clearly percentage-based
+eaf_vals <- gwas$eaf[is.finite(gwas$eaf)]
+if (length(eaf_vals)) {
+  pct_gt1_lt100  <- mean(eaf_vals > 1 & eaf_vals <= 100)
+  if (pct_gt1_lt100 > 0.9) {
+    cat(sprintf("[!] EAF likely 0–100 (%.1f%% of finite values); scaling to 0–1\n", 100 * pct_gt1_lt100))
+    gwas[, eaf := eaf / 100]
+  } else {
+    cat(sprintf("[i] EAF appears 0–1 (%.1f%% ≤1); leaving as-is\n", 100 * pct_le1))
+  }
+}
+
 # sometime -log10P might be provided - need to recode
 if (range(gwas$pval[!is.na(gwas$pval) & is.finite(gwas$pval)])[2] > 1) {
   cat("[!] -log10(P) values detected, max value in pval column =", range(gwas$pval[!is.na(gwas$pval) & is.finite(gwas$pval)])[2], "- recalculating P-values from beta and se\n")
