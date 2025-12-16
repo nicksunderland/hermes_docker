@@ -132,6 +132,19 @@ gwas[, chr := fcase(chr %in% ok_chrom, chr,
                     chr == "24",       "Y",
                     default = NA_character_)]
 
+# check chromosome coverage
+observed_chr <- sort(unique(gwas$chr))
+missing_autos <- setdiff(as.character(1:22), observed_chr)
+
+if (length(missing_autos)) {
+  stop(sprintf("ERROR: Missing autosomes: %s", paste(missing_autos, collapse = ", ")))
+}
+if (!("X" %in% observed_chr)) {
+  cat("[i] Chr X not observed; continuing\n")
+} else {
+  cat("[i] Chr X present\n")
+}
+
 #=============================================================================
 # Pre-processing: Handle censored N values (e.g., "<=40")
 #=============================================================================
