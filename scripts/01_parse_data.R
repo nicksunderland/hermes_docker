@@ -93,7 +93,7 @@ col_fn_list <- list(
   alt       = function(x) grepl("^[ACTG]+$", x),
   reference = function(x) grepl("^[ACTG]+$", x),
   eaf       = function(x) check_num(x, lb=0, ub=1),
-  beta      = function(x) check_num(x, lb=-20, ub=20),
+  beta      = function(x) check_num(x, lb=-9999, ub=9999),
   stdErr    = function(x) check_num(x, lb=0),
   pval      = function(x) check_num(x, lb=0, ub=1, lb_incl=T, ub_incl=T),
   n         = function(x) check_num(x, lb=0, is_int=T),
