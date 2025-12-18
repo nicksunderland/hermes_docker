@@ -127,17 +127,37 @@ mkdir -p "$LOCAL_OUTPUT"
 # -------------------------------------------------------
 # 1. DEFINE RESOURCE PATHS
 # -------------------------------------------------------
-# Reference and resource files
-EAF_PATH=$(setup_resource "all_afreq_b38.tsv.gz")
+# Reference and resource files (target build = GRCh37/Hg19)
+EAF_PATH=$(setup_resource "all_afreq_b37.tsv.gz")
+FASTA_37_PATH=$(setup_resource "human_g1k_v37.fasta.gz")
+FASTA_37_UNZ_TARGET=$(setup_resource "human_g1k_v37.fasta") # might not exist yet
+# Needed only when input is GRCh38 and must be lifted down to GRCh37
+CHAIN_38_TO_37_PATH=$(setup_resource "hg38ToHg19.over.chain.gz")
+# GRCh38 reference is kept only for liftover-from-38 scenarios
 FASTA_38_PATH=$(setup_resource "Homo_sapiens_assembly38_nochr.fasta.gz")
 FASTA_38_UNZ_TARGET=$(setup_resource "Homo_sapiens_assembly38_nochr.fasta") # might not exist yet
-DBSNP_PATH=$(setup_resource "dbSNP157_b38_clean.vcf.gz")
+# check dbSNP files 
+SUPPORTED_CHROMS=( {1..22} X Y MT )
+for chr in "${SUPPORTED_CHROMS[@]}"; do
+  DBSNP_FILE="${RESOURCES_DIR}/dbSNP157_b37_chr${chr}.bcf"
+  DBSNP_INDEX="${DBSNP_FILE}.csi"
+  if [[ ! -f "$DBSNP_FILE" ]]; then
+    log "CRITICAL ERROR: Missing dbSNP shard for chr${chr}"
+    log "Expected file: $DBSNP_FILE"
+    exit 1
+  fi
+  if [[ ! -f "$DBSNP_INDEX" ]]; then
+    log "CRITICAL ERROR: Missing dbSNP index for chr${chr}"
+    log "Expected file: $DBSNP_INDEX"
+    exit 1
+  fi
+done
 
 # -------------------------------------------------------
 # 2. HANDLE GENOME BUILD
 # -------------------------------------------------------
 log "Getting GWAS build"
-BUILD=$(python -c "
+BUILD_RAW=$(python -c "
 import json, os
 
 json_input = '$JSON_PATH'
@@ -153,20 +173,26 @@ except (FileNotFoundError, OSError, IsADirectoryError, json.JSONDecodeError):
 print(data.get('referenceGenome', ''))
 ")
 
-# Check we know the build
-if [[ -z "$BUILD" ]]; then
+if [[ -z "$BUILD_RAW" ]]; then
     echo 'ERROR: Could not extract referenceGenome from JSON_PATH'
     exit 1
-else
-    log "Detected build: $BUILD"
 fi
 
-# update paths based on build
-if [[ "$BUILD" == "Hg19" ]]; then
-  CHAIN_PATH=$(setup_resource "hg19ToHg38.over.chain.gz")
-  FASTA_37_PATH=$(setup_resource "human_g1k_v37.fasta.gz")
-  FASTA_37_UNZ_TARGET=$(setup_resource "human_g1k_v37.fasta") # might not exist yet
-fi
+case "$BUILD_RAW" in
+  [Hh][Gg]19|[Gg][Rr][Cc][Hh]37*)
+    INPUT_BUILD="GRCh37"
+    ;;
+  [Hh][Gg]38|[Gg][Rr][Cc][Hh]38*)
+    INPUT_BUILD="GRCh38"
+    ;;
+  *)
+    echo "ERROR: Unsupported or unknown referenceGenome string: $BUILD_RAW"
+    exit 1
+    ;;
+esac
+
+log "Detected input build: $INPUT_BUILD"
+log "Output build (target): GRCh37"
 
 # -------------------------------------------------------
 # 3. GET INPUT DATA
@@ -203,9 +229,9 @@ log "Running Step 2 gwas2vcf"
 OUTPUT_VCF="${LOCAL_OUTPUT}/gwas.vcf.gz"
 OUTPUT_STEP2_SUMMARY="${LOCAL_OUTPUT}/step2_summary.tsv"
 
-REF=$(ensure_unzipped "$FASTA_38_PATH" "$FASTA_38_UNZ_TARGET")
-if [[ "$BUILD" == "Hg19" ]]; then
-    REF=$(ensure_unzipped "$FASTA_37_PATH" "$FASTA_37_UNZ_TARGET")
+REF=$(ensure_unzipped "$FASTA_37_PATH" "$FASTA_37_UNZ_TARGET")
+if [[ "$INPUT_BUILD" == "GRCh38" ]]; then
+    REF=$(ensure_unzipped "$FASTA_38_PATH" "$FASTA_38_UNZ_TARGET")
 fi
 
 python /gwas2vcf/main.py \
@@ -224,42 +250,142 @@ validate_output "$OUTPUT_VCF" "Step 2 (gwas2vcf conversion)"
 #########################################
 activate_conda hermes
 log "Running Step 3 bcftools liftover & annotate"
-DBSNP="$DBSNP_PATH"
+
 CORES=$(nproc)
-OUTPUT_VCF_B38="${LOCAL_OUTPUT}/gwas_b38.vcf.gz"
+log "Available cores: ${CORES}"
+
+OUTPUT_VCF_B37="${LOCAL_OUTPUT}/gwas_b37.vcf.gz"
+OUTPUT_TSV_B37="${LOCAL_OUTPUT}/gwas_b37.tsv.gz"
 OUTPUT_STEP3_SUMMARY="${LOCAL_OUTPUT}/step3_summary.tsv"
 
-if [[ "$BUILD" == "Hg19" ]]; then
+if [[ "$INPUT_BUILD" == "GRCh38" ]]; then
 
-    REF_37=$(ensure_unzipped "$FASTA_37_PATH" "$FASTA_37_UNZ_TARGET")
+    log "Running Step 3 bcftools liftover to hg19"
+
     REF_38=$(ensure_unzipped "$FASTA_38_PATH" "$FASTA_38_UNZ_TARGET")
+    REF_37=$(ensure_unzipped "$FASTA_37_PATH" "$FASTA_37_UNZ_TARGET")
 
     bcftools +liftover "$OUTPUT_VCF" \
-        -- -s "$REF_37" \
-        -f "$REF_38" \
-        -c "$CHAIN_PATH" \
+        -- -s "$REF_38" \
+        -f "$REF_37" \
+        -c "$CHAIN_38_TO_37_PATH" \
         2>> "$OUTPUT_STEP3_SUMMARY" \
-        | bcftools view -Oz -o "$OUTPUT_VCF_B38.tmp.gz" -
+        | bcftools view -Oz -o "$OUTPUT_VCF_B37.tmp.gz" -
 
-    bcftools sort -Oz -o "$OUTPUT_VCF_B38.tmp.sorted.gz" "$OUTPUT_VCF_B38.tmp.gz"
-    mv "$OUTPUT_VCF_B38.tmp.sorted.gz" "$OUTPUT_VCF_B38.tmp.gz"
+    bcftools sort -Oz -o "$OUTPUT_VCF_B37.tmp.sorted.gz" "$OUTPUT_VCF_B37.tmp.gz"
+    mv "$OUTPUT_VCF_B37.tmp.sorted.gz" "$OUTPUT_VCF_B37.tmp.gz"
 else
-    cp "$OUTPUT_VCF" "$OUTPUT_VCF_B38.tmp.gz"
+    log "Running Step 3 - no liftover required, already build hg19"
+    cp "$OUTPUT_VCF" "$OUTPUT_VCF_B37.tmp.gz"
     : > "$OUTPUT_STEP3_SUMMARY"
 fi
 
-bcftools index -f --csi "$OUTPUT_VCF_B38.tmp.gz"
+# Index VCF file
+log "Running Step 3 - indexing temporary VCF file"
+bcftools index -f --csi "$OUTPUT_VCF_B37.tmp.gz"
 
 # Annotate with dbSNP
-bcftools annotate -a "$DBSNP" -c ID -O z --threads "$CORES" \
-    "$OUTPUT_VCF_B38.tmp.gz" -o "$OUTPUT_VCF_B38"
+log "Detecting chromosomes present in input VCF"
+
+VCF_CHROMS=$(bcftools query -f '%CHROM\n' "$OUTPUT_VCF_B37.tmp.gz" \
+  | sort -u)
+  
+CHROMS=()
+for chr in "${SUPPORTED_CHROMS[@]}"; do
+  if echo "$VCF_CHROMS" | grep -qx "$chr"; then
+    CHROMS+=( "$chr" )
+  fi
+done
+
+if [[ ${#CHROMS[@]} -eq 0 ]]; then
+  log "CRITICAL ERROR: No supported chromosomes found in input VCF"
+  exit 1
+fi
+log "Chromosomes to process: ${CHROMS[*]}"
+
+
+log "Splitting target VCF by chromosome"
+for chr in "${CHROMS[@]}"; do
+  bcftools view -r "$chr" -O b \
+    -o "${LOCAL_OUTPUT}/target_chr${chr}.bcf" \
+    "$OUTPUT_VCF_B37.tmp.gz" &
+done
+wait
+
+for chr in "${CHROMS[@]}"; do
+  bcftools index -f "${LOCAL_OUTPUT}/target_chr${chr}.bcf"
+done
+
+
+# Annotate with dbSNP
+MAXJOBS=$(( CORES < 8 ? CORES : 8 ))
+pids=()
+
+log "Annotating with up to ${MAXJOBS} parallel jobs"
+for chr in "${CHROMS[@]}"; do
+  log "Launching annotation for chr${chr}"
+
+  bcftools annotate \
+    -a "${RESOURCES_DIR}/dbSNP157_b37_chr${chr}.bcf" \
+    -c ID -O b \
+    "${LOCAL_OUTPUT}/target_chr${chr}.bcf" \
+    -o "${LOCAL_OUTPUT}/annotated_chr${chr}.bcf" \
+    2> >(sed "s/^/[chr${chr}] /" >&2) &
+
+  pids+=( "$!" )
+
+  if (( ${#pids[@]} >= MAXJOBS )); then
+    for pid in "${pids[@]}"; do
+      if ! wait "$pid"; then
+        log "CRITICAL ERROR: dbSNP annotation failed"
+        exit 1
+      fi
+    done
+    pids=()
+  fi
+done
+
+# wait for remaining jobs
+for pid in "${pids[@]}"; do
+  if ! wait "$pid"; then
+    log "CRITICAL ERROR: dbSNP annotation failed"
+    exit 1
+  fi
+done
+
+
+log "Writing final GWAS summary statistics (TSV.gz)"
+ANNOTATED_FILES=()
+for chr in "${CHROMS[@]}"; do
+  ANNOTATED_FILES+=( "${LOCAL_OUTPUT}/annotated_chr${chr}.bcf" )
+done
+
+for f in "${ANNOTATED_FILES[@]}"; do
+  if [[ ! -s "$f" ]]; then
+    log "CRITICAL ERROR: Missing or empty annotated file: $f"
+    exit 1
+  fi
+done
+
+printf "rsid\tchr\tbp_b37\toa\tea\teaf\tbeta\tse\tnlog10p\tn\tncase\n" \
+| cat - <(
+    bcftools concat "${ANNOTATED_FILES[@]}" \
+    | bcftools query -f '%ID\t%CHROM\t%POS\t%REF\t%ALT\t%AF\t[%ES]\t[%SE]\t[%LP]\t[%SS]\t[%NC]\n'
+  ) \
+| bgzip -c > "$OUTPUT_TSV_B37"
+
 
 # Cleanup
-rm -f "$OUTPUT_VCF_B38.tmp.gz" "$OUTPUT_VCF_B38.tmp.gz.csi"
+rm -f "$OUTPUT_VCF_B37.tmp.gz" "$OUTPUT_VCF_B37.tmp.gz.csi"
+rm -f ${LOCAL_OUTPUT}/target_chr*.bcf*
+rm -f ${LOCAL_OUTPUT}/annotated_chr*.bcf*
 
-bcftools index -f --csi "$OUTPUT_VCF_B38"
+if [[ "$(zcat "$OUTPUT_TSV_B37" | wc -l)" -le 1 ]]; then
+  log "CRITICAL ERROR: Step 3 produced empty GWAS TSV"
+  exit 1
+fi
 
-validate_output "$OUTPUT_VCF_B38" "Step 3 (Liftover & Annotation)"
+validate_output "$OUTPUT_TSV_B37" "Step 3 (Liftover & Annotation)"
 
 
 #########################################
@@ -267,11 +393,11 @@ validate_output "$OUTPUT_VCF_B38" "Step 3 (Liftover & Annotation)"
 #########################################
 log "Running QC Step 4 reporting"
 EAF_REF="$EAF_PATH"
-OUTPUT_CLEAN_GWAS="${LOCAL_OUTPUT}/gwas_b38_clean.tsv.gz"
+OUTPUT_CLEAN_GWAS="${LOCAL_OUTPUT}/gwas_b37_clean.tsv.gz"
 OUTPUT_REPORT="${LOCAL_OUTPUT}/gwas_report.html"
 
 Rscript /scripts/04_qc_report.R \
-    "$OUTPUT_VCF_B38" \
+    "$OUTPUT_TSV_B37" \
     "$JSON_PATH" \
     "$OUTPUT_STEP1_SUMMARY" \
     "$OUTPUT_STEP2_SUMMARY" \
@@ -300,7 +426,7 @@ fi
 
 # If FILE_GUID looks like a directory, use local mode; otherwise assume S3 upload
 if [[ "$FILE_GUID" == /* || "$FILE_GUID" == ./* || -d "$FILE_GUID" ]]; then
-    log "Detected local output path — copying locally"
+    log "Detected local output path — copying locally to ${FILE_GUID}"
     mkdir -p "$FILE_GUID/images" "$FILE_GUID/tables"
 
     cp "$OUTPUT_CLEAN_GWAS" "$FILE_GUID/tables/"

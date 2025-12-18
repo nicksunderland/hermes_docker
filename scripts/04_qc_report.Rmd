@@ -23,40 +23,57 @@ library(kableExtra)
 library(jsonlite)
 ```
 # Cohort details
+Summary of the study configuration provided to the pipeline. This mirrors the JSON metadata (trait name, ancestry, build, sample sizes, and column mappings) so readers can confirm the run used the expected inputs.
 ```{r details, echo=FALSE, results='asis'}
 json_str <- toJSON(meta, pretty = TRUE, auto_unbox = TRUE)
 cat("```json\n", json_str, "\n```", sep = "")
 ```
 
 # Missingness & data validity
+Results from the initial parsing step. The table reports column data types, counts of non-missing values, and validity checks applied during formatting (e.g., allele characters, numeric ranges, and integer-only fields).
 ```{r missingness, echo=FALSE}
 knitr::kable(summary, format = "html", booktabs = TRUE, caption = "GWAS Summary") |>
   kable_styling(bootstrap_options = c("striped", "hold_position", "scale_down"))
 ```
 
-# Lift-over to Hg38
-```{r lift, echo=FALSE}
-knitr::kable(liftover_stats, format = "html", booktabs = TRUE, caption = "GWAS Lift-over") |>
-  kable_styling(bootstrap_options = c("striped", "hold_position", "scale_down"))
-```
-
 # Harmonisation
+Variant harmonisation output from `gwas2vcf`. Counts show how many variants were harmonised, switched, normalised, skipped, or discarded, helping identify losses due to allele mismatches or formatting issues.
 ```{r harmonisation, echo=FALSE}
 knitr::kable(harm_summary, format = "html", booktabs = TRUE, caption = "GWAS Harmonisation") |>
-  kable_styling(bootstrap_options = c("striped", "hold_position", "scale_down"))
+  kable_styling(bootstrap_options = c("striped", "hold_position", "scale_down"), 
+                full_width = FALSE) |> 
+  row_spec(
+    which(harm_summary$Info == "Final"),
+    bold = TRUE
+  )
+```
+
+# Lift-over to Hg19
+If input data were GRCh38, this section summarises the bcftools liftover step to GRCh37/hg19. Counts show how many variants were swapped, had reference alleles added, or were rejected before producing the final set.
+```{r lift, echo=FALSE}
+knitr::kable(liftover_stats, format = "html", booktabs = TRUE, caption = "GWAS Lift-over") |>
+  kable_styling(bootstrap_options = c("striped", "hold_position", "scale_down"), 
+                full_width = FALSE) |> 
+  row_spec(
+    which(liftover_stats$Info == "Final"),
+    bold = TRUE
+  )
 ```
 
 # Allele frequency difference
+Comparison of cohort allele frequencies against the ancestry-matched 1000G reference. The hex plot highlights concordant variants, while the table reports how many sites exceed the 0.2 absolute frequency difference threshold or were absent from the reference.
 ```{r freq_plot, echo=FALSE, out.width='80%', fig.align='center'}
 knitr::include_graphics(eaf_plot_fp, rel_path=FALSE)
 ```
 
 ```{r freq_diff, echo=FALSE}
 knitr::kable(freq_diff_summary, format = "html", booktabs = TRUE, caption = "GWAS allele frequency difference") |>
-  kable_styling(bootstrap_options = c("striped", "hold_position", "scale_down"))
+  kable_styling(bootstrap_options = c("striped", "hold_position", "scale_down"), 
+                full_width = FALSE)
 ```
 
 # Analytical plots
+Analytical quality checks derived from the cleaned summary statistics. The PZ plot compares observed P-values to those implied by Z-scores (detecting sign or standard error issues), and the QQ plot shows inflation/deflation with lambda-GC and LDSC intercept references for population stratification.
 ```{r, pz_plot, echo=FALSE, out.width='80%', fig.align='center'}
 knitr::include_graphics(pz_plot_fp, rel_path=FALSE)
 ```

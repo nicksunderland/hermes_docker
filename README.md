@@ -81,7 +81,7 @@ The pipeline applies specific logic to clean and standardize the data:
 
 | Field | Validation Rule | Action / Transformation |
 |:---|:---|:---|
-| **Chromosome** | Must be 1-24, X, Y | • Removes “chr” prefix if present <br> • Maps numeric `23` $\to$ `X` <br> • Maps numeric `24` $\to$ `Y` |
+| **Chromosome** | Must be 1-24, X, Y | • Removes “chr” prefix if present <br> • Maps numeric `23` $\to$ `X` <br> • Maps numeric `24` $\to$ `Y` <br> • Maps numeric `25` $\to$ `X` <br> • Maps string `PAR` $\to$ `X` <br> • Maps string `XY` or `YX` $\to$ `X` |
 | **Position** | Integer $> 0$ | Invalid non-integers or $\le 0$ are set to `NA` |
 | **Alleles** | A, C, T, G characters | • Converted to Uppercase <br> • Non-ACTG characters are set to `NA` |
 | **P-values** | $0 \le P \le 1$ | • Recodes $P=0$ to machine min (`.Machine$double.xmin`) <br> • Auto-calc: Recalculates from $\beta, SE$ if $-log_{10}P$ is detected |
@@ -121,6 +121,7 @@ metrics:
 | `VariantsNotHarmonised` | Variants that could not be matched to the reference (mismatched alleles/positions). |
 | `SwitchedAlleles` | Variants where the Effect/Other alleles were swapped to match the reference orientation. |
 | `NormalisedVariants` | Indels that were normalized (e.g., parsimonious representation) to match the reference. |
+| `Final` | `TotalVariants` minus `VariantsNotHarmonised` |
 
 ### Step 3: Liftover & Annotation
 
@@ -132,19 +133,16 @@ plugin
 [`line 187`](https://github.com/nicksunderland/hermes_docker/blob/3d6adef5c31964c103adac766f816627bab2d23c/run.sh#L237)
 
 To ensure all datasets are meta-analysis ready, they are harmonized to
-**GRCh38**. This is because GRCh38 has the greatest coverage and results
-in the least amount of data loss. For example, nearly all of GRCh37 is
-represented in GRCh38, but the reverse is not true. This is simple to
-change should we want to continue with the original plan for a GRCh37
-analysis.
+**GRCh37 / Hg19**. If the input is GRCh38 it is lifted down to GRCh37 so
+all downstream outputs share the same build.
 
 The pipeline utilizes specific resource files to bridge datasets to this
 standard:
 
 | File | Description | Action |
 |:---|:---|:---|
-| `hg19ToHg38.over.chain.gz` | UCSC Chain File | **Liftover:** If the input is Hg19/GRCh37, `bcftools +liftover` uses this chain file to map coordinates to GRCh38. |
-| `dbSNP157_b38_clean.vcf.gz` | NCBI dbSNP 157 | **Annotation:** Updates `rsIDs` to the most current standard, ensuring variants are matched by position/allele rather than potentially outdated identifiers. |
+| `hg38ToHg19.over.chain.gz` | UCSC Chain File | **Liftover:** If the input is GRCh38, `bcftools +liftover` uses this chain file to map coordinates to GRCh37. |
+| `dbSNP157_b37_clean.vcf.gz` | NCBI dbSNP 157 | **Annotation:** Updates `rsIDs` to the most current standard, ensuring variants are matched by position/allele rather than potentially outdated identifiers. |
 
 ### Final Output Schema
 
@@ -154,14 +152,14 @@ standard:
 [`line 315`](https://github.com/nicksunderland/hermes_docker/blob/main/scripts/04_qc_report.R#L315)
 
 The final pipeline output is a tab-separated value (TSV) file,
-harmonized to GRCh38 and annotated with the latest dbSNP identifiers.
+harmonized to GRCh37 and annotated with the latest dbSNP identifiers.
 
 | Column | Description |
 |:---|:---|
 | `varid` | Variant ID \[chr:pos_pmin(ea, oa)\_pmax(ea, oa)\] |
 | `rsid` | Variant ID (dbSNP b157) |
-| `chr` | Chromosome (GRCh38) |
-| `bp_b38` | Base Position (GRCh38) |
+| `chr` | Chromosome (GRCh37) |
+| `bp_b37` | Base Position (GRCh37) |
 | `oa` | Other Allele (Forward strand) |
 | `ea` | Effect Allele (Forward strand) |
 | `eaf` | Effect Allele Frequency |
@@ -270,20 +268,77 @@ the scripts under
     #> ├── Homo_sapiens_assembly38_nochr.fasta.fai
     #> ├── Homo_sapiens_assembly38_nochr.fasta.gz
     #> ├── README.txt
+    #> ├── all_afreq_b37.tsv.gz
     #> ├── all_afreq_b38.tsv.gz
+    #> ├── dbSNP157_b37_chr1.bcf
+    #> ├── dbSNP157_b37_chr1.bcf.csi
+    #> ├── dbSNP157_b37_chr10.bcf
+    #> ├── dbSNP157_b37_chr10.bcf.csi
+    #> ├── dbSNP157_b37_chr11.bcf
+    #> ├── dbSNP157_b37_chr11.bcf.csi
+    #> ├── dbSNP157_b37_chr12.bcf
+    #> ├── dbSNP157_b37_chr12.bcf.csi
+    #> ├── dbSNP157_b37_chr13.bcf
+    #> ├── dbSNP157_b37_chr13.bcf.csi
+    #> ├── dbSNP157_b37_chr14.bcf
+    #> ├── dbSNP157_b37_chr14.bcf.csi
+    #> ├── dbSNP157_b37_chr15.bcf
+    #> ├── dbSNP157_b37_chr15.bcf.csi
+    #> ├── dbSNP157_b37_chr16.bcf
+    #> ├── dbSNP157_b37_chr16.bcf.csi
+    #> ├── dbSNP157_b37_chr17.bcf
+    #> ├── dbSNP157_b37_chr17.bcf.csi
+    #> ├── dbSNP157_b37_chr18.bcf
+    #> ├── dbSNP157_b37_chr18.bcf.csi
+    #> ├── dbSNP157_b37_chr19.bcf
+    #> ├── dbSNP157_b37_chr19.bcf.csi
+    #> ├── dbSNP157_b37_chr2.bcf
+    #> ├── dbSNP157_b37_chr2.bcf.csi
+    #> ├── dbSNP157_b37_chr20.bcf
+    #> ├── dbSNP157_b37_chr20.bcf.csi
+    #> ├── dbSNP157_b37_chr21.bcf
+    #> ├── dbSNP157_b37_chr21.bcf.csi
+    #> ├── dbSNP157_b37_chr22.bcf
+    #> ├── dbSNP157_b37_chr22.bcf.csi
+    #> ├── dbSNP157_b37_chr3.bcf
+    #> ├── dbSNP157_b37_chr3.bcf.csi
+    #> ├── dbSNP157_b37_chr4.bcf
+    #> ├── dbSNP157_b37_chr4.bcf.csi
+    #> ├── dbSNP157_b37_chr5.bcf
+    #> ├── dbSNP157_b37_chr5.bcf.csi
+    #> ├── dbSNP157_b37_chr6.bcf
+    #> ├── dbSNP157_b37_chr6.bcf.csi
+    #> ├── dbSNP157_b37_chr7.bcf
+    #> ├── dbSNP157_b37_chr7.bcf.csi
+    #> ├── dbSNP157_b37_chr8.bcf
+    #> ├── dbSNP157_b37_chr8.bcf.csi
+    #> ├── dbSNP157_b37_chr9.bcf
+    #> ├── dbSNP157_b37_chr9.bcf.csi
+    #> ├── dbSNP157_b37_chrMT.bcf
+    #> ├── dbSNP157_b37_chrMT.bcf.csi
+    #> ├── dbSNP157_b37_chrX.bcf
+    #> ├── dbSNP157_b37_chrX.bcf.csi
+    #> ├── dbSNP157_b37_chrY.bcf
+    #> ├── dbSNP157_b37_chrY.bcf.csi
+    #> ├── dbSNP157_b37_clean.vcf.gz
+    #> ├── dbSNP157_b37_clean.vcf.gz.tbi
     #> ├── dbSNP157_b38_clean.vcf.gz
     #> ├── dbSNP157_b38_clean.vcf.gz.tbi
     #> ├── hg19ToHg38.over.chain.gz
+    #> ├── hg19_rename_chrom_names.tsv
+    #> ├── hg38ToHg19.over.chain.gz
     #> ├── human_g1k_v37.fasta.fai
     #> ├── human_g1k_v37.fasta.gz
     #> ├── make_afreq.R
+    #> ├── make_afreq_b37.R
     #> ├── make_chain.sh
     #> ├── make_dbsnp.sh
+    #> ├── make_dbsnp_b37.sh
     #> └── make_fasta.sh
 
 ### 6. Run the QC
 
-Running the QC for the **All Of US** dataset.
+Running the QC for a **Random Sample of 20k variants**.
 
 **Note:** This example assumes you are in the hermes_docker project
 root - change the data paths. The volume flags (-v) automatically map
@@ -311,50 +366,30 @@ docker run --rm \
     -v "$OUT_DIR":/output \
     -v "$TMP_DIR":/tmp \
     nicksunderland/hermes_docker:latest \
-    /data/aou_eur_p1_combo.tsv.gz \
-    /data/config_hermes_aou.json \
+    /data/test_data.tsv.gz \
+    /data/config.json \
     /resources \
-    /output/aou
+    /output/test_output
     
 # Optional: clean up tmp directory after run
 rm -rf "$TMP_DIR"
 ```
 
-### Results AOU (synthetic data for GitHub repository)
+### Results (synthetic data for GitHub repository)
 
-The output from the QC pipeline for the **AOU** file looks like this:
+The output from the QC pipeline for the **Test** file looks like this:
 
-    #> /Users/xx20081/git/hermes_docker/tests/output/aou
+    #> /Users/xx20081/git/hermes_docker/tests/output/test_output
     #> ├── images
     #> │   ├── eaf_plot.png
     #> │   ├── gwas_report.html
     #> │   ├── pz_plot.png
     #> │   └── qq_plot.png
     #> └── tables
-    #>     └── gwas_b38_clean.tsv.gz
+    #>     └── gwas_b37_clean.tsv.gz
 
 #### QC report
 
 The generated `html` report.
 
-<img src="man/figures/report_preview_aou.png" align="center" width="1000" alt="HTML report" />
-
-### Results UKBB (synthetic data for GitHub repository)
-
-The output from the QC pipeline for the **UK Biobank** file looks like
-this:
-
-    #> /Users/xx20081/git/hermes_docker/tests/output/ukbb
-    #> ├── images
-    #> │   ├── eaf_plot.png
-    #> │   ├── gwas_report.html
-    #> │   ├── pz_plot.png
-    #> │   └── qq_plot.png
-    #> └── tables
-    #>     └── gwas_b38_clean.tsv.gz
-
-#### QC report
-
-The generated `html` report.
-
-<img src="man/figures/report_preview_ukbb.png" align="center" width="1000" alt="HTML report" />
+<img src="man/figures/report_preview_test_output.png" align="center" width="1000" alt="HTML report" />

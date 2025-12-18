@@ -21,17 +21,20 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install extra tools
-RUN conda install -y -c conda-forge \
+RUN --mount=type=cache,id=conda-pkgs,target=/opt/conda/pkgs \
+    conda install -y -c conda-forge \
     mamba \
     && conda clean --all --yes
 
 # Install AWS CLI
-RUN mamba install -y -c conda-forge \
+RUN --mount=type=cache,id=conda-pkgs,target=/opt/conda/pkgs \
+    mamba install -y -c conda-forge \
     awscli \
     && conda clean --all --yes
 
 # Preinstall base R to reduce build time for envs
-RUN mamba install -y -c conda-forge \
+RUN --mount=type=cache,id=conda-pkgs,target=/opt/conda/pkgs \
+    mamba install -y -c conda-forge \
     r-base=4.4.3 \
     r-essentials \
     && conda clean --all --yes
@@ -43,11 +46,13 @@ FROM r_base AS hermes
 
 # Create environments from YAML
 COPY environment_hermes.yml /tmp/environment_hermes.yml
-RUN mamba env create -f /tmp/environment_hermes.yml && \
+RUN --mount=type=cache,id=conda-pkgs,target=/opt/conda/pkgs \
+    mamba env create -f /tmp/environment_hermes.yml && \
     mamba clean --all --yes
 
 COPY environment_gwas2vcf.yml /tmp/environment_gwas2vcf.yml
-RUN mamba env create -f /tmp/environment_gwas2vcf.yml && \
+RUN --mount=type=cache,id=conda-pkgs,target=/opt/conda/pkgs \
+    mamba env create -f /tmp/environment_gwas2vcf.yml && \
     mamba clean --all --yes
 
 # Activate GWAS2VCF env and reinstall vgraph from GitHub
@@ -112,7 +117,12 @@ ENTRYPOINT ["/run.sh"]
 # docker buildx create --use
 
 # all in one:
-# docker buildx build --platform linux/amd64 --progress=plain --tag nicksunderland/hermes_docker:latest --file Dockerfile --cache-from type=registry,ref=nicksunderland/hermes_docker:latest --cache-to type=inline --push . 2>&1 | tee docker_build.log
+#docker buildx build \
+#  --platform linux/amd64 \
+#  --tag nicksunderland/hermes_docker:latest \
+#  --cache-from type=registry,ref=nicksunderland/hermes_docker:buildcache \
+#  --cache-to type=registry,ref=nicksunderland/hermes_docker:buildcache,mode=max \
+#  --push .
 
 # clean local and pull:
 # docker rmi nicksunderland/hermes_docker:latest

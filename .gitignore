@@ -14,3 +14,5 @@ hermes_docker.Rproj
 !tests/resources/make_dbsnp.sh
 !tests/resources/make_fasta.sh
 !tests/resources/make_afreq.R
+!tests/resources/make_dbsnp_b37.sh
+!tests/resources/make_afreq_b37.R

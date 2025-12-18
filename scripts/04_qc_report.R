@@ -3,16 +3,16 @@
 #### DESCRIPTION #######################################
 # This script performs the GWAS QC step (standalone version)
 # Usage:
-#   Rscript gwas_qc_step2.R <vcf> <meta_file> <step1_tbl> <step2_tbl> <step3_tbl> <eaf_ref> <report_tmp> <clean_tsv> <report>
+#   Rscript gwas_qc_step2.R <tsv> <meta_file> <step1_tbl> <step2_tbl> <step3_tbl> <eaf_ref> <report_tmp> <clean_tsv> <report>
 
 #### SET INPUT #########################################
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) != 9) {
-  stop("Usage: Rscript gwas_qc_step2.R <vcf> <meta_file> <step1_tbl> <step2_tbl> <step3_tbl> <eaf_ref> <report_tmp> <clean_tsv> <report>")
+  stop("Usage: Rscript gwas_qc_step2.R <tsv> <meta_file> <step1_tbl> <step2_tbl> <step3_tbl> <eaf_ref> <report_tmp> <clean_tsv> <report>")
 }
 
-vcf        <- args[1]
+tsv        <- args[1]
 meta_file  <- args[2]
 step1_tbl  <- args[3]
 step2_tbl  <- args[4]
@@ -24,11 +24,11 @@ report     <- args[9]
 
 # testing ====
 if (FALSE) {
-  vcf        = '/myriadfs/projects/mol_cardio/Projects/p051-h3dcm/output/tmp_objects/parsed_gwas/dcm/eur/mixed/biovu-dcm-eur-mixed.vcf.gz'
+  tsv        = '/myriadfs/projects/mol_cardio/Projects/p051-h3dcm/output/tmp_objects/parsed_gwas/dcm/eur/mixed/biovu-dcm-eur-mixed.tsv.gz'
   meta_file  = '/myriadfs/projects/mol_cardio/data/hermes_cohorts/biovu/biovu_h3pheno4_topmed_eur_mixed.json'
   step1_tbl  = '/myriadfs/projects/mol_cardio/Projects/p051-h3dcm/output/tmp_objects/parsed_gwas/dcm/eur/mixed/biovu-dcm-eur-mixed_step1_summary.tsv'
   step2_tbl  = '/myriadfs/projects/mol_cardio/Projects/p051-h3dcm/output/tmp_objects/parsed_gwas/dcm/eur/mixed/biovu-dcm-eur-mixed-step2_summary.txt'
-  eaf_ref    = '/myriadfs/projects/mol_cardio/data/genome_references/1kg_v3/all_afreq_b38.tsv.gz'
+  eaf_ref    = '/myriadfs/projects/mol_cardio/data/genome_references/1kg_v3/all_afreq_b37.tsv.gz'
   clean_gwas = ''
   report     = '/myriadfs/projects/mol_cardio/Projects/p051-h3dcm/output/figures/qc_reports/foo.pdf'
   report_tmp = '/myriadfs/projects/mol_cardio/Projects/p051-h3dcm/scripts/gwas_qc.Rmd'
@@ -38,7 +38,6 @@ if (FALSE) {
 # requirements ====
 library(data.table)
 library(jsonlite)
-library(vcfR)
 library(hexbin)
 library(ggplot2)
 library(ldscr)
@@ -48,30 +47,14 @@ library(stringr)
 # read gwas ====
 cat(sprintf("Reading GWAS file: %s\n", basename(meta_file)))
 meta <- fromJSON(meta_file)
-cat(sprintf("Reading GWAS file: %s\n", basename(vcf)))
-vcf_dat <- read.vcfR(vcf)
-
-# extract from vcf object ====
-cat("converting VCF to data.table\n")
-gwas <- vcfR2tidy(vcf_dat,
-                  single_frame  = TRUE,
-                  info_types    = TRUE,
-                  format_fields = c("ES","SE","LP","SS","NC"),
-                  format_types  = TRUE,
-                  alleles       = FALSE,
-                  gt_column_prepend = "")
-gwas <- as.data.table(gwas$dat)
-cols <- c(rsid="ID", chr="CHROM", bp_b38="POS", oa="REF", ea="ALT", eaf="AF", beta="ES", se="SE", nlog10p="LP", n="SS", ncase="NC")
-gwas[, setdiff(names(gwas), unname(cols)) := NULL]
-setnames(gwas, unname(cols), names(cols))
-setcolorder(gwas, names(cols))
-rm(vcf_dat)
-gc()
+cat(sprintf("Reading GWAS file: %s\n", basename(tsv)))
+gwas <- fread(tsv)
+print(str(gwas))
 
 # fix data
 cat("fixing data types\n")
 gwas[, chr := as.character(chr)]
-gwas[, bp_b38 := as.integer(bp_b38)]
+gwas[, bp_b37 := as.integer(bp_b37)]
 gwas[, eaf := as.numeric(eaf)]
 gwas[, beta := as.numeric(beta)]
 gwas[, se := as.numeric(se)]
@@ -91,7 +74,7 @@ freq <- data.table::fread(eaf_ref)
 col_fn_list <- list(
   rsid      = as.character,
   chr       = as.character,
-  pos_b38   = as.integer,
+  pos_b37   = as.integer,
   ref       = as.character,
   alt       = as.character,
   afr_afreq = as.numeric,
@@ -132,8 +115,8 @@ freq <- freq[!is.na(afreq)]
 cat("analysing allele frequency difference\n")
 
 # get the allele frequencies for this ancestry
-join_vec  <- stats::setNames(c("chr", "pos_b38", "ref", "alt"), c("chr", "bp_b38", "oa", "ea"))
-rjoin_vec <- stats::setNames(c("chr", "pos_b38", "ref", "alt"), c("chr", "bp_b38", "ea", "oa"))
+join_vec  <- stats::setNames(c("chr", "pos_b37", "ref", "alt"), c("chr", "bp_b37", "oa", "ea"))
+rjoin_vec <- stats::setNames(c("chr", "pos_b37", "ref", "alt"), c("chr", "bp_b37", "ea", "oa"))
 gwas[freq, `:=`(reference_id    = i.rsid,
                 reference_afreq = i.afreq),     on = join_vec]
 gwas[freq, `:=`(reference_id    = i.rsid,
@@ -148,10 +131,12 @@ gwas[, freq_diff := factor(abs(eaf - reference_afreq) > freq_diff_thresh,
 
 # print frequency difference counts
 freq_diff_summary <- data.table(table(gwas$freq_diff, useNA = "always"))
-freq_diff_summary[, pct := sprintf("%.1f%%", 100*(N / nrow(gwas)))]
-
-# print summary to console
-print(freq_diff_summary)
+freq_diff_summary[, Percentage := sprintf("%.1f%%", 100*(N / nrow(gwas)))]
+setnames(freq_diff_summary, c("N", "V1"), c("Num. Variants", "Info"))
+freq_diff_summary[grepl("", Info), Info := sprintf("Absolute EAF-Reference difference < %.1f%%", 100*freq_diff_thresh)]
+freq_diff_summary[grepl("^freq_diff_lt", Info), Info := sprintf("Absolute EAF-Reference difference < %.1f%%", 100*freq_diff_thresh)]
+freq_diff_summary[grepl("^freq_diff_gt", Info), Info := sprintf("Absolute EAF-Reference difference > %.1f%%", 100*freq_diff_thresh)]
+freq_diff_summary[is.na(Info) | grepl("^NA$", Info), Info := "Not found in reference"]
 
 # plot the frequency differences
 eaf_plot <- ggplot(mapping = aes(x = reference_afreq, y = eaf)) +
@@ -281,7 +266,8 @@ qq_plot <- qq_data |>
   scale_fill_manual(values = point_colors) +
   labs(x = log10Pe,
        y = log10Po,
-       color = "Adjustment") +
+       color = "Adjustment", 
+       fill  = "Adjustment") +
   theme_minimal(base_size = 18) +
   theme(aspect.ratio    = 1,
         legend.position = "top")
@@ -301,7 +287,7 @@ if (!is.null(adjustment)) {
 }
 
 # sorted allele ID column
-gwas[, varid := paste0(chr, ":", bp_b38, "_", pmin(ea, oa), "_", pmax(ea, oa))]
+gwas[, varid := paste0(chr, ":", bp_b37, "_", pmin(ea, oa), "_", pmax(ea, oa))]
 gwas[, rsid := fcoalesce(rsid, reference_id)]
 data.table::setcolorder(gwas, c("varid", "rsid"))
 
@@ -329,29 +315,49 @@ extract_stat <- function(stat_name){
 }
 
 # get gwas2vcf details
-log_info <- list()
-log_info$total_variants <- extract_stat("Total variants")
-log_info$variants_harmonised <- extract_stat("Variants harmonised")
-log_info$variants_discarded <- extract_stat("Variants discarded during harmonisation")
-log_info$alleles_switched <- extract_stat("Alleles switched")
-log_info$normalised_variants <- extract_stat("Normalised variants")
-log_info$skipped_variants <- extract_stat("Skipped")
-harm_summary <- as.data.table(log_info)
+total_variants      <- extract_stat("Total variants")
+variants_discarded  <- extract_stat("Variants discarded during harmonisation")
+harm_summary <- data.table(
+  Info = c(
+    "Total variants",
+    "Variants harmonised",
+    "Variants discarded",
+    "Alleles switched",
+    "Normalised variants",
+    "Skipped", 
+    "Final"
+  ),
+  Count = c(
+    total_variants,
+    extract_stat("Variants harmonised"),
+    variants_discarded,
+    extract_stat("Alleles switched"),
+    extract_stat("Normalised variants"),
+    extract_stat("Skipped"), 
+    total_variants - variants_discarded
+  )
+)
 
 # liftover log
 step3_lines <- readLines(step3_tbl)
 line <- step3_lines[str_detect(step3_lines, "Lines\\s+total/swapped/reference added/rejected:")]
 if(length(line) == 0){
-  liftover_stats <- data.table(total=NA_integer_, swapped=NA_integer_,
-                               reference_added=NA_integer_, rejected=NA_integer_)
+  liftover_stats <- data.table(
+    Info  = c("Total", "Swapped", "Reference added", "Rejected", "Final"),
+    Count = NA_integer_
+  )
 } else {
   # Extract the four numbers
   numbers <- str_match(line, "(\\d+)/(\\d+)/(\\d+)/(\\d+)")[1,2:5]
   liftover_stats <- data.table(
-    total = as.integer(numbers[1]),
-    swapped = as.integer(numbers[2]),
-    reference_added = as.integer(numbers[3]),
-    rejected = as.integer(numbers[4])
+    Info  = c("Total", "Swapped", "Reference added", "Rejected", "Final"),
+    Count = c(
+      as.integer(numbers[1]),
+      as.integer(numbers[2]),
+      as.integer(numbers[3]),
+      as.integer(numbers[4]),
+      as.integer(numbers[1]) - as.integer(numbers[4])
+    )
   )
 }
 
