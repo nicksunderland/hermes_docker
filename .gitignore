@@ -1,7 +1,7 @@
 tests/data/*
 tests/output/*
 tests/resources/*
-tests/tmp/*
+tests/scratch*
 .idea
 docker_build.log
 .Rproj.user

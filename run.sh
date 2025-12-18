@@ -51,6 +51,19 @@ echo "================="
 
 
 #########################################
+# SETUP FILES
+#########################################
+# Set temp directories
+SCRATCH=/scratch
+mkdir -p "$SCRATCH"
+export TMPDIR="$SCRATCH"
+export TMP="$SCRATCH"
+export TEMP="$SCRATCH"
+export R_TEMPDIR="$SCRATCH"
+
+LOCAL_GWAS_FILE="$SCRATCH/input_gwas.tsv.gz"
+
+#########################################
 # UTILITY FUNCTIONS
 #########################################
 activate_conda() {
@@ -73,8 +86,8 @@ download_or_copy() {
 setup_resource() {
     local file_name="$1"
     if [[ "$RESOURCES_DIR" == s3://* ]]; then
-        local local_dest="/tmp/resources/$file_name"
-        mkdir -p "/tmp/resources"
+        local local_dest="$SCRATCH/resources/$file_name"
+        mkdir -p "$SCRATCH/resources"
         download_or_copy "$RESOURCES_DIR/$file_name" "$local_dest"
         echo "$local_dest"
     else
@@ -105,24 +118,18 @@ ensure_unzipped() {
     fi
     # 2. If unzipped doesn't exist, we must unzip the GZ file to /tmp/scratch
     local scratch_dest
-    scratch_dest="/tmp/$(basename "$unz_path")"
+    scratch_dest="/scratch/$(basename "$unz_path")"
     # Check if we already unzipped it in a previous run/step
     if [[ -f "$scratch_dest" ]]; then
         echo "$scratch_dest"
         return
     fi
-    log "Unzipping $(basename "$gz_path") to /tmp..." >&2
+    log "Unzipping $(basename "$gz_path") to $SCRATCH..." >&2
     # Decompress to stdout > destination to handle read-only source mounts
     gzip -dc "$gz_path" > "$scratch_dest"
     echo "$scratch_dest"
 }
 
-#########################################
-# SETUP FILES
-#########################################
-LOCAL_GWAS_FILE="/tmp/input_gwas.tsv.gz"
-LOCAL_OUTPUT="/tmp/output"
-mkdir -p "$LOCAL_OUTPUT"
 
 # -------------------------------------------------------
 # 1. DEFINE RESOURCE PATHS
@@ -206,9 +213,9 @@ download_or_copy "$DATA_PATH" "$LOCAL_GWAS_FILE"
 #########################################
 activate_conda hermes
 log "Running QC Step 1"
-OUTPUT_PARSED_GWAS="${LOCAL_OUTPUT}/parsed_gwas.tsv"
-OUTPUT_GWAS2VCF_JSON="${LOCAL_OUTPUT}/gwas2vcf.json"
-OUTPUT_STEP1_SUMMARY="${LOCAL_OUTPUT}/step1_summary.tsv"
+OUTPUT_PARSED_GWAS="${SCRATCH}/parsed_gwas.tsv"
+OUTPUT_GWAS2VCF_JSON="${SCRATCH}/gwas2vcf.json"
+OUTPUT_STEP1_SUMMARY="${SCRATCH}/step1_summary.tsv"
 
 Rscript /scripts/01_parse_data.R \
   "$LOCAL_GWAS_FILE" \
@@ -226,8 +233,8 @@ validate_output "$OUTPUT_GWAS2VCF_JSON" "Step 1 (JSON Generation)"
 #########################################
 activate_conda gwas2vcf
 log "Running Step 2 gwas2vcf"
-OUTPUT_VCF="${LOCAL_OUTPUT}/gwas.vcf.gz"
-OUTPUT_STEP2_SUMMARY="${LOCAL_OUTPUT}/step2_summary.tsv"
+OUTPUT_VCF="${SCRATCH}/gwas.vcf.gz"
+OUTPUT_STEP2_SUMMARY="${SCRATCH}/step2_summary.tsv"
 
 REF=$(ensure_unzipped "$FASTA_37_PATH" "$FASTA_37_UNZ_TARGET")
 if [[ "$INPUT_BUILD" == "GRCh38" ]]; then
@@ -254,9 +261,9 @@ log "Running Step 3 bcftools liftover & annotate"
 CORES=$(nproc)
 log "Available cores: ${CORES}"
 
-OUTPUT_VCF_B37="${LOCAL_OUTPUT}/gwas_b37.vcf.gz"
-OUTPUT_TSV_B37="${LOCAL_OUTPUT}/gwas_b37.tsv.gz"
-OUTPUT_STEP3_SUMMARY="${LOCAL_OUTPUT}/step3_summary.tsv"
+OUTPUT_VCF_B37="${SCRATCH}/gwas_b37.vcf.gz"
+OUTPUT_TSV_B37="${SCRATCH}/gwas_b37.tsv.gz"
+OUTPUT_STEP3_SUMMARY="${SCRATCH}/step3_summary.tsv"
 
 if [[ "$INPUT_BUILD" == "GRCh38" ]]; then
 
@@ -272,7 +279,12 @@ if [[ "$INPUT_BUILD" == "GRCh38" ]]; then
         2>> "$OUTPUT_STEP3_SUMMARY" \
         | bcftools view -Oz -o "$OUTPUT_VCF_B37.tmp.gz" -
 
-    bcftools sort -Oz -o "$OUTPUT_VCF_B37.tmp.sorted.gz" "$OUTPUT_VCF_B37.tmp.gz"
+    bcftools sort \
+      -T "$SCRATCH/bcftools-sort" \
+      -Oz \
+      -o "$OUTPUT_VCF_B37.tmp.sorted.gz" \
+      "$OUTPUT_VCF_B37.tmp.gz"
+
     mv "$OUTPUT_VCF_B37.tmp.sorted.gz" "$OUTPUT_VCF_B37.tmp.gz"
 else
     log "Running Step 3 - no liftover required, already build hg19"
@@ -307,13 +319,13 @@ log "Chromosomes to process: ${CHROMS[*]}"
 log "Splitting target VCF by chromosome"
 for chr in "${CHROMS[@]}"; do
   bcftools view -r "$chr" -O b \
-    -o "${LOCAL_OUTPUT}/target_chr${chr}.bcf" \
+    -o "${SCRATCH}/target_chr${chr}.bcf" \
     "$OUTPUT_VCF_B37.tmp.gz" &
 done
 wait
 
 for chr in "${CHROMS[@]}"; do
-  bcftools index -f "${LOCAL_OUTPUT}/target_chr${chr}.bcf"
+  bcftools index -f "${SCRATCH}/target_chr${chr}.bcf"
 done
 
 
@@ -328,8 +340,8 @@ for chr in "${CHROMS[@]}"; do
   bcftools annotate \
     -a "${RESOURCES_DIR}/dbSNP157_b37_chr${chr}.bcf" \
     -c ID -O b \
-    "${LOCAL_OUTPUT}/target_chr${chr}.bcf" \
-    -o "${LOCAL_OUTPUT}/annotated_chr${chr}.bcf" \
+    "${SCRATCH}/target_chr${chr}.bcf" \
+    -o "${SCRATCH}/annotated_chr${chr}.bcf" \
     2> >(sed "s/^/[chr${chr}] /" >&2) &
 
   pids+=( "$!" )
@@ -357,7 +369,7 @@ done
 log "Writing final GWAS summary statistics (TSV.gz)"
 ANNOTATED_FILES=()
 for chr in "${CHROMS[@]}"; do
-  ANNOTATED_FILES+=( "${LOCAL_OUTPUT}/annotated_chr${chr}.bcf" )
+  ANNOTATED_FILES+=( "${SCRATCH}/annotated_chr${chr}.bcf" )
 done
 
 for f in "${ANNOTATED_FILES[@]}"; do
@@ -377,8 +389,8 @@ printf "rsid\tchr\tbp_b37\toa\tea\teaf\tbeta\tse\tnlog10p\tn\tncase\n" \
 
 # Cleanup
 rm -f "$OUTPUT_VCF_B37.tmp.gz" "$OUTPUT_VCF_B37.tmp.gz.csi"
-rm -f ${LOCAL_OUTPUT}/target_chr*.bcf*
-rm -f ${LOCAL_OUTPUT}/annotated_chr*.bcf*
+rm -f ${SCRATCH}/target_chr*.bcf*
+rm -f ${SCRATCH}/annotated_chr*.bcf*
 
 if [[ "$(zcat "$OUTPUT_TSV_B37" | wc -l)" -le 1 ]]; then
   log "CRITICAL ERROR: Step 3 produced empty GWAS TSV"
@@ -393,8 +405,8 @@ validate_output "$OUTPUT_TSV_B37" "Step 3 (Liftover & Annotation)"
 #########################################
 log "Running QC Step 4 reporting"
 EAF_REF="$EAF_PATH"
-OUTPUT_CLEAN_GWAS="${LOCAL_OUTPUT}/gwas_b37_clean.tsv.gz"
-OUTPUT_REPORT="${LOCAL_OUTPUT}/gwas_report.html"
+OUTPUT_CLEAN_GWAS="${SCRATCH}/gwas_b37_clean.tsv.gz"
+OUTPUT_REPORT="${SCRATCH}/gwas_report.html"
 
 Rscript /scripts/04_qc_report.R \
     "$OUTPUT_TSV_B37" \
@@ -430,7 +442,7 @@ if [[ "$FILE_GUID" == /* || "$FILE_GUID" == ./* || -d "$FILE_GUID" ]]; then
     mkdir -p "$FILE_GUID/images" "$FILE_GUID/tables"
 
     cp "$OUTPUT_CLEAN_GWAS" "$FILE_GUID/tables/"
-    for file in "$LOCAL_OUTPUT/gwas_report.html" "$LOCAL_OUTPUT/eaf_plot.png" "$LOCAL_OUTPUT/pz_plot.png" "$LOCAL_OUTPUT/qq_plot.png"; do
+    for file in "$SCRATCH/gwas_report.html" "$SCRATCH/eaf_plot.png" "$SCRATCH/pz_plot.png" "$SCRATCH/qq_plot.png" "$OUTPUT_STEP1_SUMMARY" "$OUTPUT_STEP2_SUMMARY" "$OUTPUT_STEP3_SUMMARY"; do
         if [[ ! -f "$file" ]]; then
             echo "ERROR: file not found: $file"
             exit 1
@@ -447,7 +459,7 @@ else
         --no-progress
 
     # Upload HTML + PNG files to images/
-    for file in "$LOCAL_OUTPUT/gwas_report.html" "$LOCAL_OUTPUT/eaf_plot.png" "$LOCAL_OUTPUT/pz_plot.png" "$LOCAL_OUTPUT/qq_plot.png"; do
+    for file in "$SCRATCH/gwas_report.html" "$SCRATCH/eaf_plot.png" "$SCRATCH/pz_plot.png" "$SCRATCH/qq_plot.png"; do
         if [[ ! -f "$file" ]]; then
             echo "ERROR: file not found: $file"
             exit 1

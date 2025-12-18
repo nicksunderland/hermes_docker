@@ -13,55 +13,55 @@
 DATA_DIR="$HOME/git/hermes_docker/tests/data"
 RES_DIR="$HOME/git/hermes_docker/tests/resources"
 OUT_DIR="$HOME/git/hermes_docker/tests/output"
-TMP_DIR="$HOME/git/hermes_docker/tests/tmp"
-mkdir -p "$TMP_DIR" "$OUT_DIR"
+SCRATCH_DIR="$HOME/git/hermes_docker/tests/scratch"
+mkdir -p "$SCRATCH_DIR" "$OUT_DIR"
 docker run --rm \
   --platform linux/amd64 \
   -v "$DATA_DIR":/data \
   -v "$RES_DIR":/resources \
   -v "$OUT_DIR":/output \
-  -v "$TMP_DIR":/tmp \
+  -v "$SCRATCH_DIR":/scratch \
   nicksunderland/hermes_docker:latest \
   /data/test_data.tsv.gz \
   /data/config.json \
   /resources \
   /output/test_output
-rm -rf "$TMP_DIR"
+rm -rf "$SCRATCH_DIR"
 
 # Run AOU
 DATA_DIR="$HOME/git/hermes_docker/tests/data"
 RES_DIR="$HOME/git/hermes_docker/tests/resources"
 OUT_DIR="$HOME/git/hermes_docker/tests/output"
-TMP_DIR="$HOME/git/hermes_docker/tests/tmp"
-mkdir -p "$TMP_DIR" "$OUT_DIR"
+SCRATCH_DIR="$HOME/git/hermes_docker/tests/scratch_aou"
+mkdir -p "$SCRATCH_DIR" "$OUT_DIR"
 docker run --rm \
   --platform linux/amd64 \
   -v "$DATA_DIR":/data \
   -v "$RES_DIR":/resources \
   -v "$OUT_DIR":/output \
-  -v "$TMP_DIR":/tmp \
+  -v "$SCRATCH_DIR":/scratch \
   nicksunderland/hermes_docker:latest \
   /data/aou_eur_p1_combo.tsv.gz \
   /data/config_hermes_aou.json \
   /resources \
   /output/aou
-rm -rf "$TMP_DIR"
+rm -rf "$SCRATCH_DIR"
 
 # Run UKBB
 DATA_DIR="$HOME/git/hermes_docker/tests/data"
 RES_DIR="$HOME/git/hermes_docker/tests/resources"
 OUT_DIR="$HOME/git/hermes_docker/tests/output"
-TMP_DIR="$HOME/git/hermes_docker/tests/tmp"
-mkdir -p "$TMP_DIR" "$OUT_DIR"
+SCRATCH_DIR="$HOME/git/hermes_docker/tests/scratch_ukbb"
+mkdir -p "$SCRATCH_DIR" "$OUT_DIR"
 docker run --rm \
   --platform linux/amd64 \
   -v "$DATA_DIR":/data \
   -v "$RES_DIR":/resources \
   -v "$OUT_DIR":/output \
-  -v "$TMP_DIR":/tmp \
+  -v "$SCRATCH_DIR":/scratch \
   nicksunderland/hermes_docker:latest \
   /data/GWAS_UKB_Pheno1_PREV_MIX_EUR_BOTH_20250114_CJ.tsv.gz \
   /data/config_hermes_ukbb.json \
   /resources \
   /output/ukbb
-rm -rf "$TMP_DIR"
+rm -rf "$SCRATCH_DIR"
